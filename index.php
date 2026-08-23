@@ -1,4 +1,7 @@
 <?php
+// กำหนด Timezone ระดับ PHP
+date_default_timezone_set('Asia/Bangkok');
+
 include('db.php');
 session_start();
 
@@ -33,7 +36,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     } else {
         // จัดการอัปโหลดไฟล์รูปภาพ
         $ext        = pathinfo($_FILES['photo']['name'], PATHINFO_EXTENSION);
-        $new_name   = 'report_' . time() . '_' . rand(1000, 9999) . '.' . $ext;
+        $new_name   = 'report_' . time() . '_' . rand(1000, 9999) . '.' . strtolower($ext);
         $target_dir = 'uploads/';
         
         if (!is_dir($target_dir)) {
@@ -44,9 +47,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if (move_uploaded_file($_FILES['photo']['tmp_name'], $target_file)) {
             $photo_path = $target_file;
 
-            // บันทึกลง PostgreSQL (แปลง Type ::double precision)
+            // บันทึกลง PostgreSQL พร้อมบังคับเวลาเป็น Asia/Bangkok
             $query = "INSERT INTO tbl_reports (user_id, latitude, longitude, elephant_count, behavior_type, details, photo_path, status, reported_at, geom) 
-                      VALUES ($1, $2::double precision, $3::double precision, $4, $5, $6, $7, 'pending', NOW(), ST_SetSRID(ST_MakePoint($3::double precision, $2::double precision), 4326))";
+                      VALUES ($1, $2::double precision, $3::double precision, $4, $5, $6, $7, 'pending', NOW() AT TIME ZONE 'Asia/Bangkok', ST_SetSRID(ST_MakePoint($3::double precision, $2::double precision), 4326))";
             
             $result = pg_query_params($db, $query, array(
                 $user_id, 
