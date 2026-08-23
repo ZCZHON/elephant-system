@@ -1,5 +1,7 @@
 <?php
-// ดึงค่าจาก Environment Variables ของ Render
+date_default_timezone_set('Asia/Bangkok');
+
+// ข้อมูลเชื่อมต่อ DB...
 $host = getenv('DB_HOST') ?: 'localhost';
 $port = getenv('DB_PORT') ?: '5432';
 $dbname = getenv('DB_NAME') ?: 'elephant_db_2uc0';
