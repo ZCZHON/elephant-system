@@ -14,5 +14,7 @@ COPY . /var/www/html/
 RUN mkdir -p /var/www/html/uploads \
     && chown -R www-data:www-data /var/www/html/uploads \
     && chmod -R 777 /var/www/html/uploads
+ENV TZ=Asia/Bangkok
+RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
 
 EXPOSE 80
