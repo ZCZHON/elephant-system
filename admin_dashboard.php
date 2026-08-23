@@ -1,0 +1,350 @@
+<?php
+include('db.php');
+session_start();
+
+// 🔒 ล็อกความปลอดภัย: ถ้าไม่ได้ล็อกอิน หรือไม่ได้เป็น admin ให้เด้งไปหน้า login
+if (!isset($_SESSION['user_id']) || ($_SESSION['role'] ?? '') !== 'admin') {
+    header("Location: login.php");
+    exit();
+}
+
+// 1. ดึงข้อมูลรายงานแจ้งเหตุทั้งหมด
+$query = "SELECT r.*, 
+                 CONCAT(u.first_name, ' ', u.last_name) AS fullname,
+                 u.phone_number 
+          FROM tbl_reports r 
+          LEFT JOIN tbl_users u ON r.user_id = u.user_id 
+          ORDER BY r.reported_at DESC";
+
+$result = pg_query($db, $query);
+$reports = ($result) ? pg_fetch_all($result) ?: [] : [];
+
+// คำนวณสถิติ
+$total_reports = count($reports);
+$pending_count = 0;
+$verified_count = 0;
+$rejected_count = 0;
+
+foreach ($reports as $r) {
+    $st = $r['status'] ?? 'pending';
+    if ($st === 'pending') $pending_count++;
+    elseif ($st === 'verified') $verified_count++;
+    elseif ($st === 'rejected') $rejected_count++;
+}
+?>
+
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>ระบบจัดการข้อมูลสำหรับเจ้าหน้าที่ (Admin Dashboard)</title>
+    
+    <!-- Google Fonts, Bootstrap 5, FontAwesome -->
+    <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+
+    <style>
+        body {
+            font-family: 'Sarabun', sans-serif;
+            background-color: #f4f6f9;
+            color: #333;
+        }
+        .navbar-admin {
+            background-color: #1b4332;
+        }
+        .card-stat {
+            border: none;
+            border-radius: 12px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+            transition: transform 0.2s;
+            background: #fff;
+        }
+        .card-stat:hover {
+            transform: translateY(-2px);
+        }
+        .table-card {
+            border: none;
+            border-radius: 12px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.05);
+            background: #fff;
+        }
+        .img-report {
+            width: 55px;
+            height: 55px;
+            object-fit: cover;
+            border-radius: 8px;
+            cursor: pointer;
+            border: 1px solid #dee2e6;
+            transition: transform 0.15s ease-in-out;
+        }
+        .img-report:hover {
+            transform: scale(1.08);
+            border-color: #198754;
+        }
+        
+        /* 📱 Mobile Adjustments */
+        @media (max-width: 768px) {
+            .table-responsive {
+                font-size: 0.85rem;
+            }
+            .btn-action {
+                padding: 4px 8px;
+                font-size: 0.75rem;
+            }
+            .card-stat h3 {
+                font-size: 1.4rem !important;
+            }
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Header Navbar -->
+    <nav class="navbar navbar-expand-lg navbar-dark navbar-admin shadow-sm">
+        <div class="container-fluid container-md">
+            <a class="navbar-brand fw-bold" href="<?php echo $_SERVER['PHP_SELF']; ?>">
+                🐘 Admin Management
+            </a>
+            
+            <div class="d-flex align-items-center gap-2">
+                <span class="text-white me-2 d-none d-md-inline small">
+                    <i class="fa-solid fa-user-shield me-1 text-warning"></i>
+                    <?php echo htmlspecialchars($_SESSION['fullname'] ?? 'เจ้าหน้าที่'); ?>
+                </span>
+                
+                <a href="public_map.php" class="btn btn-outline-light btn-sm fw-bold">
+                    <i class="fa-solid fa-map-location-dot me-1"></i>
+                    <span class="d-none d-sm-inline">แผนที่</span> (Public Map)
+                </a>
+                
+                <a href="logout.php" class="btn btn-danger btn-sm fw-bold">
+                    <i class="fa-solid fa-right-from-bracket"></i>
+                    <span class="d-none d-sm-inline ms-1">ออกจากระบบ</span>
+                </a>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container-fluid container-md my-4">
+        
+        <!-- Header -->
+        <div class="d-flex justify-content-between align-items-center mb-3">
+            <div>
+                <h4 class="fw-bold text-dark mb-0">
+                    <i class="fa-solid fa-sliders me-2 text-success"></i>ระบบจัดการรายงานช้างป่า
+                </h4>
+                <p class="text-muted small mb-0 d-none d-sm-block">ตรวจสอบและยืนยันข้อมูลจากอาสาสมัครก่อนแสดงบนแผนที่สาธารณะ</p>
+            </div>
+        </div>
+
+        <!-- สรุปสถิติ 4 ช่อง -->
+        <div class="row g-2 mb-4">
+            <div class="col-6 col-md-3">
+                <div class="card card-stat p-3 border-start border-primary border-4">
+                    <div class="text-muted small fw-bold">รายงานทั้งหมด</div>
+                    <h3 class="fw-bold text-primary mb-0 mt-1"><?php echo number_format($total_reports); ?></h3>
+                </div>
+            </div>
+            <div class="col-6 col-md-3">
+                <div class="card card-stat p-3 border-start border-warning border-4">
+                    <div class="text-muted small fw-bold">รอตรวจสอบ (Pending)</div>
+                    <h3 class="fw-bold text-warning mb-0 mt-1"><?php echo number_format($pending_count); ?></h3>
+                </div>
+            </div>
+            <div class="col-6 col-md-3">
+                <div class="card card-stat p-3 border-start border-success border-4">
+                    <div class="text-muted small fw-bold">อนุมัติแล้ว (Verified)</div>
+                    <h3 class="fw-bold text-success mb-0 mt-1"><?php echo number_format($verified_count); ?></h3>
+                </div>
+            </div>
+            <div class="col-6 col-md-3">
+                <div class="card card-stat p-3 border-start border-danger border-4">
+                    <div class="text-muted small fw-bold">ปฏิเสธ (Rejected)</div>
+                    <h3 class="fw-bold text-danger mb-0 mt-1"><?php echo number_format($rejected_count); ?></h3>
+                </div>
+            </div>
+        </div>
+
+        <!-- ตารางจัดการข้อมูล -->
+        <div class="table-card p-3 p-md-4">
+            <div class="table-responsive">
+                <table class="table table-hover align-middle mb-0">
+                    <thead class="table-light">
+                        <tr>
+                            <th style="width: 70px;">รูปภาพ</th>
+                            <th>เวลาแจ้งเหตุ</th>
+                            <th>ผู้แจ้ง / เบอร์โทร</th>
+                            <th>จำนวน</th>
+                            <th>พฤติกรรม</th>
+                            <th>รายละเอียด / พิกัด</th>
+                            <th>สถานะ</th>
+                            <th class="text-center" style="min-width: 130px;">จัดการ</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php if (!empty($reports)): ?>
+                            <?php foreach ($reports as $row): ?>
+                                <tr id="row-<?php echo $row['report_id']; ?>">
+                                    <!-- รูปภาพเปิดดูด้วย Modal -->
+                                    <td>
+                                        <?php if (!empty($row['photo_path'])): ?>
+                                            <img src="<?php echo htmlspecialchars($row['photo_path']); ?>" 
+                                                 class="img-report" 
+                                                 alt="รูปช้าง"
+                                                 title="กดเพื่อขยายรูปภาพ"
+                                                 onclick="openImageModal('<?php echo htmlspecialchars($row['photo_path']); ?>')">
+                                        <?php else: ?>
+                                            <div class="bg-light text-muted text-center rounded py-2 small" style="width:55px; height:55px; line-height:38px;">
+                                                <i class="fa-regular fa-image"></i>
+                                            </div>
+                                        <?php endif; ?>
+                                    </td>
+
+                                    <!-- เวลาที่รายงาน -->
+                                    <td class="small">
+                                        <div class="fw-bold text-dark">
+                                            <?php echo date('d/m/Y', strtotime($row['reported_at'] ?? $row['created_at'])); ?>
+                                        </div>
+                                        <div class="text-muted">
+                                            <?php echo date('H:i น.', strtotime($row['reported_at'] ?? $row['created_at'])); ?>
+                                        </div>
+                                    </td>
+
+                                    <td>
+                                        <div class="fw-bold text-dark small"><?php echo htmlspecialchars($row['fullname'] ?: 'ไม่ระบุชื่อ'); ?></div>
+                                        <a href="tel:<?php echo htmlspecialchars($row['phone_number']); ?>" class="text-decoration-none text-muted small">
+                                            <i class="fa-solid fa-phone fa-xs me-1"></i><?php echo htmlspecialchars($row['phone_number'] ?: '-'); ?>
+                                        </a>
+                                    </td>
+
+                                    <td>
+                                        <span class="badge bg-danger rounded-pill px-2 fs-6">
+                                             <?php echo $row['elephant_count']; ?>
+                                        </span>
+                                    </td>
+
+                                    <td>
+                                        <span class="badge bg-light text-dark border">
+                                            <?php echo htmlspecialchars(($row['behavior_type'] ?? $row['behavior'] ?? '') ?: 'ไม่ระบุ'); ?>
+                                        </span>
+                                    </td>
+
+                                    <td class="small" style="max-width: 220px;">
+                                        <div class="text-truncate" title="<?php echo htmlspecialchars($row['details']); ?>">
+                                            <?php echo htmlspecialchars($row['details'] ?: '-'); ?>
+                                        </div>
+                                        <small class="text-primary d-block">
+                                            <i class="fa-solid fa-location-dot me-1"></i><?php echo $row['latitude']; ?>, <?php echo $row['longitude']; ?>
+                                        </small>
+                                    </td>
+
+                                    <td id="status-badge-<?php echo $row['report_id']; ?>">
+                                        <?php if ($row['status'] === 'verified'): ?>
+                                            <span class="badge bg-success"><i class="fa-solid fa-check me-1"></i>Verified</span>
+                                        <?php elseif ($row['status'] === 'rejected'): ?>
+                                            <span class="badge bg-danger"><i class="fa-solid fa-xmark me-1"></i>Rejected</span>
+                                        <?php else: ?>
+                                            <span class="badge bg-warning text-dark"><i class="fa-solid fa-clock me-1"></i>Pending</span>
+                                        <?php endif; ?>
+                                    </td>
+
+                                    <td class="text-center">
+                                        <div class="btn-group btn-group-sm" role="group">
+                                            <button onclick="updateStatus(<?php echo $row['report_id']; ?>, 'verified')" 
+                                                    class="btn btn-success btn-action" 
+                                                    title="อนุมัติและแสดงบนแผนที่">
+                                                <i class="fa-solid fa-check"></i> <span class="d-none d-md-inline">อนุมัติ</span>
+                                            </button>
+                                            <button onclick="updateStatus(<?php echo $row['report_id']; ?>, 'rejected')" 
+                                                    class="btn btn-outline-danger btn-action" 
+                                                    title="ปฏิเสธรายงานนี้">
+                                                <i class="fa-solid fa-xmark"></i>
+                                            </button>
+                                        </div>
+                                    </td>
+                                </tr>
+                            <?php endforeach; ?>
+                        <?php else: ?>
+                            <tr>
+                                <td colspan="8" class="text-center text-muted py-5">
+                                    <i class="fa-solid fa-folder-open fa-2x mb-2 text-secondary opacity-50"></i>
+                                    <div>ยังไม่มีรายการแจ้งเหตุในระบบ</div>
+                                </td>
+                            </tr>
+                        <?php endif; ?>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- 🖼️ Modal ป๊อปอัปขยายรูปภาพ -->
+    <div class="modal fade" id="imagePreviewModal" tabindex="-1" aria-labelledby="imagePreviewLabel" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered modal-lg">
+            <div class="modal-content bg-dark text-white border-0 shadow-lg">
+                <div class="modal-header border-secondary py-2">
+                    <h6 class="modal-title fw-bold" id="imagePreviewLabel">
+                        <i class="fa-solid fa-image me-2 text-warning"></i>รูปภาพจากรายงาน
+                    </h6>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body text-center p-2">
+                    <img id="modalImageTarget" src="" class="img-fluid rounded" style="max-height: 75vh; object-fit: contain;" alt="รูปภาพขยาย">
+                </div>
+                <div class="modal-footer border-secondary py-2 justify-content-between">
+                    <button type="button" class="btn btn-secondary btn-sm px-3 fw-bold" data-bs-dismiss="modal">
+                        <i class="fa-solid fa-xmark me-1"></i>ปิดหน้าต่าง
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Bootstrap 5 JS Bundle & JavaScript -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        // 🖼️ เปิด Modal แสดงรูปใหญ่
+        function openImageModal(imageSrc) {
+            document.getElementById('modalImageTarget').src = imageSrc;
+            var imageModal = new bootstrap.Modal(document.getElementById('imagePreviewModal'));
+            imageModal.show();
+        }
+
+        // ⚡ อัปเดตสถานะ อนุมัติ / ปฏิเสธ
+        function updateStatus(reportId, newStatus) {
+            var actionText = newStatus === 'verified' ? 'อนุมัติ' : 'ปฏิเสธ';
+            
+            if (confirm(`คุณต้องการ "${actionText}" รายการนี้ใช่หรือไม่?`)) {
+                fetch('update_status.php', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                    body: `report_id=${reportId}&status=${newStatus}`
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        var badgeCell = document.getElementById('status-badge-' + reportId);
+                        
+                        if (newStatus === 'verified') {
+                            badgeCell.innerHTML = '<span class="badge bg-success"><i class="fa-solid fa-check me-1"></i>Verified</span>';
+                            if (confirm('อนุมัติข้อมูลเรียบร้อยแล้ว! ต้องการเปิดไปดูตำแหน่งช้างบนแผนที่สาธารณะเลยหรือไม่?')) {
+                                window.location.href = 'public_map.php?highlight_id=' + reportId;
+                            }
+                        } else {
+                            badgeCell.innerHTML = '<span class="badge bg-danger"><i class="fa-solid fa-xmark me-1"></i>Rejected</span>';
+                        }
+                    } else {
+                        alert('เกิดข้อผิดพลาด: ' + (data.message || 'ไม่สามารถอัปเดตสถานะได้'));
+                    }
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    alert('เกิดข้อผิดพลาดในการเชื่อมต่อเซิร์ฟเวอร์');
+                });
+            }
+        }
+    </script>
+</body>
+</html>
