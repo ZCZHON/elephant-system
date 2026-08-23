@@ -1,23 +1,17 @@
 <?php
-// การตั้งค่าการเชื่อมต่อฐานข้อมูล PostgreSQL (XAMPP)
-$host     = "localhost";
-$port     = "5432";         // พอร์ตมาตรฐานของ PostgreSQL
-$dbname   = "elephant_db";   // ชื่อฐานข้อมูลของคุณ
-$user     = "postgres";      // ชื่อผู้ใช้งานหลักของ PostgreSQL
-$password = "Namzom";        // รหัสผ่านฐานข้อมูลที่คุณตั้งไว้
+// ดึงค่าจาก Environment Variables ของ Render
+$host = getenv('DB_HOST') ?: 'localhost';
+$port = getenv('DB_PORT') ?: '5432';
+$dbname = getenv('DB_NAME') ?: 'elephant_db_2uc0';
+$user = getenv('DB_USER') ?: 'postgres_elephant';
+$password = getenv('DB_PASSWORD') ?: '2Ea4suoOfjTUjoyFfamIrUqRpSKOIEUt';
 
-// รวมคำสั่ง Connection String
-$connection_string = "host={$host} port={$port} dbname={$dbname} user={$user} password={$password}";
+// เพิ่ม sslmode=require เพื่อให้รองรับ Render PostgreSQL
+$conn_string = "host={$host} port={$port} dbname={$dbname} user={$user} password={$password} sslmode=require";
 
-// ทำการเชื่อมต่อฐานข้อมูล
-$db = pg_connect($connection_string);
+$db = @pg_connect($conn_string);
 
-// ตรวจสอบสถานะการเชื่อมต่อ
 if (!$db) {
-    // หากเชื่อมต่อล้มเหลว จะแสดง Error ออกมาทางหน้าจอ (เหมาะสำหรับช่วงทดสอบระบบ)
-    die("❌ ไม่สามารถเชื่อมต่อฐานข้อมูล PostgreSQL ได้: " . pg_last_error());
+    die("Database Connection Failed: " . error_get_last()['message']);
 }
-
-// ตั้งค่าให้ระบบรองรับภาษาไทย (UTF-8) อย่างสมบูรณ์
-pg_set_client_encoding($db, "UNICODE"); 
 ?>
