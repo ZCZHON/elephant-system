@@ -22,9 +22,9 @@ $success_msg = false;
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $latitude       = trim($_POST['latitude'] ?? '');
     $longitude      = trim($_POST['longitude'] ?? '');
-    $elephant_count = $_POST['elephant_count'] ?? 1;
-    $behavior_type  = $_POST['behavior_type'] ?? '';
-    $details        = $_POST['details'] ?? '';
+    $elephant_count = (int)($_POST['elephant_count'] ?? 1);
+    $behavior_type  = trim($_POST['behavior_type'] ?? '');
+    $details        = trim($_POST['details'] ?? '');
 
     // 🔒 Validation: บังคับต้องระบุพิกัด และแนบรูปภาพเท่านั้น
     $has_photo = isset($_FILES['photo']) && $_FILES['photo']['error'] === UPLOAD_ERR_OK && $_FILES['photo']['size'] > 0;
@@ -39,8 +39,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $new_name   = 'report_' . time() . '_' . rand(1000, 9999) . '.' . strtolower($ext);
         $target_dir = 'uploads/';
         
+        // ปรับ Permission เป็น 0755 เพื่อความปลอดภัย
         if (!is_dir($target_dir)) {
-            mkdir($target_dir, 0777, true);
+            mkdir($target_dir, 0755, true);
         }
         
         $target_file = $target_dir . $new_name;
@@ -181,7 +182,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script>
-        const map = L.map('map').setView([13.543210, 102.123450], 9);
+        // ปรับตำแหน่งเริ่มต้นเป็นกึ่งกลางประเทศไทย
+        const map = L.map('map').setView([13.736717, 100.523186], 6);
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 18, attribution: '© OpenStreetMap' }).addTo(map);
 
         let marker;
@@ -194,6 +196,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
 
         function locateUser() {
+            // เช็กว่ารันบน HTTPS หรือ localhost หรือไม่ (ป้องกัน Geolocation ถูกบล็อกบน HTTP)
+            if (location.protocol !== 'https:' && location.hostname !== 'localhost' && location.hostname !== '127.0.0.1') {
+                Swal.fire({
+                    icon: 'info',
+                    title: 'คำแนะนำการใช้งาน GPS',
+                    text: 'เนื่องจากขณะนี้เข้าใช้งานผ่าน HTTP (ยังไม่มี SSL) เบราว์เซอร์อาจบล็อกการดึง GPS อัตโนมัติ ท่านสามารถคลิกเลือกตำแหน่งพิกัดบนแผนที่ได้โดยตรงครับ',
+                    confirmButtonColor: '#198754'
+                });
+                return;
+            }
+
             if (navigator.geolocation) {
                 Swal.fire({ title: 'กำลังค้นหาตำแหน่งของคุณ...', allowOutsideClick: false, didOpen: () => { Swal.showLoading(); } });
                 navigator.geolocation.getCurrentPosition(
@@ -204,7 +217,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         map.setView([lat, lng], 15, { animate: true });
                         setMarker(lat, lng);
                     },
-                    (error) => { Swal.fire('ไม่สามารถระบุตำแหน่งได้', 'กรุณาเปิด GPS หรือคลิกเลือกพิกัดบนแผนที่ด้วยตนเอง', 'error'); },
+                    (error) => { 
+                        Swal.fire('ไม่สามารถระบุตำแหน่งได้', 'กรุณาเปิด GPS หรือคลิกเลือกพิกัดบนแผนที่ด้วยตนเอง', 'warning'); 
+                    },
                     { enableHighAccuracy: true, timeout: 10000 }
                 );
             }
