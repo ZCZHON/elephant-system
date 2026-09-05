@@ -7,7 +7,10 @@ session_start();
 
 // 🐘 ประมวลผลเมื่อมีการส่งฟอร์มรายงาน (POST Request)
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    $line_userid    = trim($_POST['line_userid'] ?? '');
+    // กำหนดให้ Output คืนค่ากลับเป็น JSON เสมอ
+    header('Content-Type: application/json; charset=utf-8');
+
+    $line_user_id   = trim($_POST['line_userid'] ?? ''); // หรือ line_user_id
     $user_name      = trim($_POST['user_name'] ?? 'ผู้ใช้งาน LINE');
     $latitude       = trim($_POST['latitude'] ?? '');
     $longitude      = trim($_POST['longitude'] ?? '');
@@ -21,57 +24,65 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     // 🔒 Validation
     $has_photo = isset($_FILES['photo']) && $_FILES['photo']['error'] === UPLOAD_ERR_OK && $_FILES['photo']['size'] > 0;
 
-    if (empty($line_userid)) {
+    if (empty($line_user_id)) {
         $error_msg = "ไม่พบข้อมูลบัญชี LINE กรุณาลองใหม่อีกครั้ง";
     } elseif (empty($latitude) || empty($longitude)) {
         $error_msg = "กรุณาเลือกตำแหน่งพิกัดบนแผนที่ก่อนส่งรายงาน";
     } elseif (!$has_photo) {
         $error_msg = "กรุณาแนบรูปภาพประกอบการรายงาน";
     } else {
-        // 1. ค้นหา หรือ สร้าง User ในฐานข้อมูล PostgreSQL อัตโนมัติจาก line_userid
-        $check_user = pg_query_params($db, "SELECT user_id, role FROM users WHERE line_userid = $1", array($line_userid));
+        // 1. ค้นหา หรือ สร้าง User ในฐานข้อมูล tbl_users อัตโนมัติจาก line_user_id
+        $check_user = pg_query_params($db, "SELECT user_id, role FROM tbl_users WHERE line_user_id = $1", array($line_user_id));
         
-        if (pg_num_rows($check_user) > 0) {
+        if ($check_user && pg_num_rows($check_user) > 0) {
             $user_row = pg_fetch_assoc($check_user);
             $user_id = $user_row['user_id'];
         } else {
-            // สมาชิกใหม่ -> บันทึกให้อัตโนมัติ
+            // สมาชิกใหม่ -> บันทึกลง tbl_users (ใส่ last_name เป็นค่าว่างป้องกัน Not Null Error)
             $insert_user = pg_query_params($db, 
-                "INSERT INTO users (line_userid, first_name, registered_at, role) VALUES ($1, $2, NOW(), 'Citizen') RETURNING user_id", 
-                array($line_userid, $user_name)
+                "INSERT INTO tbl_users (line_user_id, first_name, last_name, registered_at, role) VALUES ($1, $2, '', NOW(), 'user') RETURNING user_id", 
+                array($line_user_id, $user_name)
             );
-            $user_row = pg_fetch_assoc($insert_user);
-            $user_id = $user_row['user_id'];
-        }
-
-        // 2. จัดการอัปโหลดไฟล์รูปภาพ
-        $ext        = pathinfo($_FILES['photo']['name'], PATHINFO_EXTENSION);
-        $new_name   = 'report_' . time() . '_' . rand(1000, 9999) . '.' . strtolower($ext);
-        $target_dir = 'uploads/';
-        
-        if (!is_dir($target_dir)) {
-            mkdir($target_dir, 0755, true);
-        }
-        
-        $target_file = $target_dir . $new_name;
-        if (move_uploaded_file($_FILES['photo']['tmp_name'], $target_file)) {
-            $photo_path = $target_file;
-
-            // 3. บันทึกลง PostgreSQL พร้อมคำนวณ PostGIS Geom
-            $query = "INSERT INTO tbl_reports (user_id, latitude, longitude, elephant_count, behavior_type, details, photo_path, status, reported_at, geom) 
-                      VALUES ($1, $2::double precision, $3::double precision, $4, $5, $6, $7, 'pending', NOW() AT TIME ZONE 'Asia/Bangkok', ST_SetSRID(ST_MakePoint($3::double precision, $2::double precision), 4326))";
             
-            $result = pg_query_params($db, $query, array(
-                $user_id, $latitude, $longitude, $elephant_count, $behavior_type, $details, $photo_path
-            ));
-
-            if ($result) {
-                $success_msg = true;
+            if ($insert_user) {
+                $user_row = pg_fetch_assoc($insert_user);
+                $user_id = $user_row['user_id'];
             } else {
-                $error_msg = "เกิดข้อผิดพลาดในการบันทึกข้อมูลลงฐานข้อมูล";
+                $error_msg = "เกิดข้อผิดพลาดในการสร้างบัญชีผู้ใช้ใหม่";
             }
-        } else {
-            $error_msg = "เกิดข้อผิดพลาดในการอัปโหลดไฟล์รูปภาพ";
+        }
+
+        // หากสามารถระบุหรือสร้าง user_id ได้สำเร็จ
+        if (!empty($user_id) && empty($error_msg)) {
+            // 2. จัดการอัปโหลดไฟล์รูปภาพ
+            $ext        = pathinfo($_FILES['photo']['name'], PATHINFO_EXTENSION);
+            $new_name   = 'report_' . time() . '_' . rand(1000, 9999) . '.' . strtolower($ext);
+            $target_dir = 'uploads/';
+            
+            if (!is_dir($target_dir)) {
+                mkdir($target_dir, 0755, true);
+            }
+            
+            $target_file = $target_dir . $new_name;
+            if (move_uploaded_file($_FILES['photo']['tmp_name'], $target_file)) {
+                $photo_path = $target_file;
+
+                // 3. บันทึกลง tbl_reports พร้อมคำนวณ PostGIS Geom
+                $query = "INSERT INTO tbl_reports (user_id, latitude, longitude, elephant_count, behavior_type, details, photo_path, status, reported_at, geom) 
+                          VALUES ($1, $2::double precision, $3::double precision, $4, $5, $6, $7, 'pending', NOW() AT TIME ZONE 'Asia/Bangkok', ST_SetSRID(ST_MakePoint($3::double precision, $2::double precision), 4326))";
+                
+                $result = pg_query_params($db, $query, array(
+                    $user_id, $latitude, $longitude, $elephant_count, $behavior_type, $details, $photo_path
+                ));
+
+                if ($result) {
+                    $success_msg = true;
+                } else {
+                    $error_msg = "เกิดข้อผิดพลาดในการบันทึกข้อมูลรายงาน";
+                }
+            } else {
+                $error_msg = "เกิดข้อผิดพลาดในการอัปโหลดไฟล์รูปภาพ";
+            }
         }
     }
 
