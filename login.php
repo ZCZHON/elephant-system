@@ -42,18 +42,19 @@ if (isset($_POST['line_login'])) {
         } else {
             // กรณีเป็นสมาชิกใหม่: สลับไปแท็บลงทะเบียนพร้อมเติมชื่อจาก LINE ให้อัตโนมัติ
             $active_tab = 'reg';
-            $alert_script = "Swal.fire('ยินดีต้อนรับ!', 'กรุณายินยอมรับนโยบายเพื่อเริ่มใช้งานระบบครับ', 'info');";
+            $alert_script = "Swal.fire('ยินดีต้อนรับ!', 'กรุณายินยอมรับนโยบายและกรอกข้อมูลเพื่อเริ่มใช้งานระบบครับ', 'info');";
         }
     }
 }
 
 // -------------------------------------------------------------
-// 2. ประมวลผลการลงทะเบียนสมาชิกใหม่ (Register ด้วย LINE ID)
+// 2. ประมวลผลการลงทะเบียนสมาชิกใหม่ (Register ด้วย LINE ID + วันเกิด)
 // -------------------------------------------------------------
 if (isset($_POST['register'])) {
     $active_tab = 'reg';
     $first_name   = trim($_POST['first_name'] ?? '');
     $last_name    = trim($_POST['last_name'] ?? '');
+    $birth_date   = trim($_POST['birth_date'] ?? '');
     $line_user_id = trim($_POST['line_user_id'] ?? '');
     $agree_term   = $_POST['agree_term'] ?? '';
 
@@ -61,6 +62,8 @@ if (isset($_POST['register'])) {
         $alert_script = "Swal.fire('ข้อผิดพลาด', 'กรุณายินยอมรับนโยบายความเป็นส่วนตัวก่อนลงทะเบียนครับ', 'error');";
     } elseif (empty($line_user_id)) {
         $alert_script = "Swal.fire('เกิดข้อผิดพลาด', 'ไม่พบ LINE User ID กรุณาลองใหม่อีกครั้งผ่านแอป LINE', 'error');";
+    } elseif (empty($birth_date)) {
+        $alert_script = "Swal.fire('ข้อผิดพลาด', 'กรุณาระบุวัน/เดือน/ปีเกิดของคุณครับ', 'error');";
     } else {
         // เช็ก LINE User ID ซ้ำในระบบ
         $check = pg_query_params($db, "SELECT line_user_id FROM tbl_users WHERE line_user_id = $1", array($line_user_id));
@@ -69,9 +72,9 @@ if (isset($_POST['register'])) {
             $alert_script = "Swal.fire('บัญชีนี้ซ้ำ', 'บัญชี LINE นี้เคยลงทะเบียนไว้แล้วครับ', 'info');";
             $active_tab = 'login';
         } else {
-            // บันทึกสมาชิกใหม่โดยใช้ line_user_id (ไม่ต้องใช้เบอร์โทรศัพท์)
-            $query = "INSERT INTO tbl_users (first_name, last_name, line_user_id, role) VALUES ($1, $2, $3, 'user') RETURNING user_id";
-            $result = pg_query_params($db, $query, array($first_name, $last_name, $line_user_id));
+            // บันทึกสมาชิกใหม่โดยใช้ line_user_id และ birth_date
+            $query = "INSERT INTO tbl_users (first_name, last_name, birth_date, line_user_id, role) VALUES ($1, $2, $3, $4, 'user') RETURNING user_id";
+            $result = pg_query_params($db, $query, array($first_name, $last_name, $birth_date, $line_user_id));
             
             if ($result && $row = pg_fetch_assoc($result)) {
                 // บันทึก Session แล้วพาเข้าสู่ระบบทันที
@@ -187,6 +190,12 @@ if (isset($_POST['register'])) {
                                     <label class="form-label small fw-bold">นามสกุล</label>
                                     <input type="text" name="last_name" class="form-control" placeholder="นามสกุล" value="<?php echo htmlspecialchars($_POST['last_name'] ?? ''); ?>" required>
                                 </div>
+                            </div>
+
+                            <!-- ช่องกรอกวัน/เดือน/ปีเกิด -->
+                            <div class="mb-3">
+                                <label class="form-label small fw-bold">📅 วัน/เดือน/ปีเกิด</label>
+                                <input type="date" name="birth_date" class="form-control" value="<?php echo htmlspecialchars($_POST['birth_date'] ?? ''); ?>" required>
                             </div>
 
                             <!-- ส่วน PDPA Consent Box -->
