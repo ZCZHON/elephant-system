@@ -5,12 +5,18 @@ date_default_timezone_set('Asia/Bangkok');
 include('db.php');
 session_start();
 
-// 🐘 ประมวลผลเมื่อมีการส่งฟอร์มรายงาน (POST Request)
+// 🔒 1. ตรวจสอบการเข้าสู่ระบบ (ถ้าไม่มี Session ให้เด้งไป login.php)
+if (!isset($_SESSION['user_id']) && $_SERVER['REQUEST_METHOD'] !== 'POST') {
+    header("Location: login.php");
+    exit;
+}
+
+// 🐘 2. ประมวลผลเมื่อมีการส่งฟอร์มรายงาน (POST Request)
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     // กำหนดให้ Output คืนค่ากลับเป็น JSON เสมอ
     header('Content-Type: application/json; charset=utf-8');
 
-    $line_user_id   = trim($_POST['line_userid'] ?? ''); // หรือ line_user_id
+    $line_user_id   = trim($_POST['line_userid'] ?? '');
     $user_name      = trim($_POST['user_name'] ?? 'ผู้ใช้งาน LINE');
     $latitude       = trim($_POST['latitude'] ?? '');
     $longitude      = trim($_POST['longitude'] ?? '');
@@ -21,7 +27,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $error_msg = null;
     $success_msg = false;
 
-    // 🔒 Validation
+    // Validation
     $has_photo = isset($_FILES['photo']) && $_FILES['photo']['error'] === UPLOAD_ERR_OK && $_FILES['photo']['size'] > 0;
 
     if (empty($line_user_id)) {
@@ -31,14 +37,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     } elseif (!$has_photo) {
         $error_msg = "กรุณาแนบรูปภาพประกอบการรายงาน";
     } else {
-        // 1. ค้นหา หรือ สร้าง User ในฐานข้อมูล tbl_users อัตโนมัติจาก line_user_id
+        // ค้นหา หรือ สร้าง User ในฐานข้อมูล tbl_users อัตโนมัติจาก line_user_id
         $check_user = pg_query_params($db, "SELECT user_id, role FROM tbl_users WHERE line_user_id = $1", array($line_user_id));
         
         if ($check_user && pg_num_rows($check_user) > 0) {
             $user_row = pg_fetch_assoc($check_user);
             $user_id = $user_row['user_id'];
         } else {
-            // สมาชิกใหม่ -> บันทึกลง tbl_users (ใส่ last_name เป็นค่าว่างป้องกัน Not Null Error)
+            // สมาชิกใหม่ -> บันทึกลง tbl_users
             $insert_user = pg_query_params($db, 
                 "INSERT INTO tbl_users (line_user_id, first_name, last_name, registered_at, role) VALUES ($1, $2, '', NOW(), 'user') RETURNING user_id", 
                 array($line_user_id, $user_name)
@@ -54,7 +60,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         // หากสามารถระบุหรือสร้าง user_id ได้สำเร็จ
         if (!empty($user_id) && empty($error_msg)) {
-            // 2. จัดการอัปโหลดไฟล์รูปภาพ
+            // จัดการอัปโหลดไฟล์รูปภาพ
             $ext        = pathinfo($_FILES['photo']['name'], PATHINFO_EXTENSION);
             $new_name   = 'report_' . time() . '_' . rand(1000, 9999) . '.' . strtolower($ext);
             $target_dir = 'uploads/';
@@ -67,7 +73,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if (move_uploaded_file($_FILES['photo']['tmp_name'], $target_file)) {
                 $photo_path = $target_file;
 
-                // 3. บันทึกลง tbl_reports พร้อมคำนวณ PostGIS Geom
+                // บันทึกลง tbl_reports พร้อมคำนวณ PostGIS Geom
                 $query = "INSERT INTO tbl_reports (user_id, latitude, longitude, elephant_count, behavior_type, details, photo_path, status, reported_at, geom) 
                           VALUES ($1, $2::double precision, $3::double precision, $4, $5, $6, $7, 'pending', NOW() AT TIME ZONE 'Asia/Bangkok', ST_SetSRID(ST_MakePoint($3::double precision, $2::double precision), 4326))";
                 
@@ -78,7 +84,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 if ($result) {
                     $success_msg = true;
                 } else {
-                    $error_msg = "เกิดข้อผิดพลาดในการบันทึกข้อมูลรายงาน";
+                    $error_msg = "เกิดข้อผิดพลาดในการบันทึกข้อมูลรายงานลงฐานข้อมูล";
                 }
             } else {
                 $error_msg = "เกิดข้อผิดพลาดในการอัปโหลดไฟล์รูปภาพ";
@@ -86,9 +92,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     }
 
-    // Return JSON สำหรับ AJAX Submission จาก LIFF
+    // Return JSON สำหรับ AJAX Submission
     echo json_encode([
-        'status' => $success_msg ? 'success' : 'error',
+        'status'  => $success_msg ? 'success' : 'error',
         'message' => $error_msg
     ]);
     exit;
@@ -106,7 +112,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
     
-    <!-- 🟢 เพิ่ม LINE LIFF SDK -->
+    <!-- 🟢 LINE LIFF SDK -->
     <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
 
     <style>
@@ -130,7 +136,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         <div class="container">
             <a class="navbar-brand fw-bold text-warning fs-6 fs-md-5" href="#">🐘 ระบบติดตามการกระจายตัวของช้างป่า</a>
             <div class="d-flex align-items-center gap-2">
-                <span class="text-white small me-1" id="line_user_display">👤 กำลังยืนยันตัวตน...</span>
+                <span class="text-white small me-1" id="line_user_display">👤 <?= htmlspecialchars($_SESSION['fullname'] ?? 'ผู้ใช้งาน LINE') ?></span>
                 <a href="dashboard.php" class="btn btn-outline-light btn-sm fw-bold">📊 Dashboard</a>
             </div>
         </div>
@@ -144,7 +150,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             </div>
 
             <form id="reportForm" enctype="multipart/form-data">
-                <!-- 🟢 Hidden Inputs สำหรับส่ง LINE UserId -->
+                <!-- Hidden Inputs สำหรับส่ง LINE UserId -->
                 <input type="hidden" name="line_userid" id="line_userid">
                 <input type="hidden" name="user_name" id="user_name">
 
@@ -191,35 +197,37 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     <input type="file" name="photo" id="photo" class="form-control" accept="image/*" capture="camera" required>
                 </div>
 
-                <button type="submit" id="btnSubmit" class="btn btn-success w-100 fw-bold py-2 fs-5 shadow" disabled>กำลังโหลดข้อมูล LINE...</button>
+                <button type="submit" id="btnSubmit" class="btn btn-success w-100 fw-bold py-2 fs-5 shadow" disabled>กำลังยืนยันตัวตน LINE...</button>
             </form>
         </div>
     </div>
 
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script>
-        // 🟢 1. เรียกใช้งาน LINE LIFF (Auto Login)
         const MY_LIFF_ID = "2011293676-4qqKadRs";
 
+        // 🟢 1. ตรวจสอบการใช้งาน LINE LIFF
         async function initLiff() {
             try {
                 await liff.init({ liffId: MY_LIFF_ID });
                 if (!liff.isLoggedIn()) {
-                    liff.login();
+                    window.location.href = "login.php";
                 } else {
                     const profile = await liff.getProfile();
                     document.getElementById('line_userid').value = profile.userId;
                     document.getElementById('user_name').value = profile.displayName;
                     document.getElementById('line_user_display').innerText = '👤 ' + profile.displayName;
                     
-                    // ปลดล็อกปุ่มส่งรายงานเมื่อดึง Profile สำเร็จ
                     const btn = document.getElementById('btnSubmit');
                     btn.disabled = false;
                     btn.innerText = 'ส่งรายงานข้อมูล';
                 }
             } catch (err) {
                 console.error("LIFF Initialization failed", err);
-                Swal.fire('ข้อผิดพลาด', 'ไม่สามารถเชื่อมต่อกับ LINE App ได้', 'error');
+                // หากรันในเบราว์เซอร์ปกติ ให้ปลดล็อกปุ่มกรณีมี Session อยู่แล้ว
+                const btn = document.getElementById('btnSubmit');
+                btn.disabled = false;
+                btn.innerText = 'ส่งรายงานข้อมูล';
             }
         }
 
@@ -296,11 +304,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 if (data.status === 'success') {
                     Swal.fire({ 
                         title: 'ส่งรายงานสำเร็จ!', 
-                        text: 'ขอบคุณสำหรับการแจ้งข้อมูลระบบได้บันทึกเรียบร้อยแล้ว', 
+                        text: 'ขอบคุณสำหรับการแจ้งข้อมูล ระบบได้บันทึกเรียบร้อยแล้ว', 
                         icon: 'success', 
                         confirmButtonColor: '#198754' 
                     }).then(() => {
-                        liff.closeWindow(); // ปิดหน้าต่าง LIFF กลับไปที่แชต LINE
+                        if (liff.isLoggedIn()) {
+                            liff.closeWindow();
+                        } else {
+                            window.location.reload();
+                        }
                     });
                 } else {
                     Swal.fire('เกิดข้อผิดพลาด', data.message || 'ไม่สามารถบันทึกข้อมูลได้', 'error');
