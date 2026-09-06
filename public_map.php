@@ -233,7 +233,7 @@ $user_name = $_SESSION['fullname'] ?? $_SESSION['username'] ?? 'เจ้าห�
                     </span>
 
                     <a href="admin_dashboard.php" class="btn btn-danger btn-sm fw-bold shadow-sm">
-                        📋 จัดการระบบ / อนุมัติข้อมูล
+                        ⚙️จัดการระบบ
                     </a>
 
                     <a href="logout.php" class="btn btn-outline-danger btn-sm fw-bold" title="ออกจากระบบ">
