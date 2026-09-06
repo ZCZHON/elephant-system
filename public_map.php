@@ -64,7 +64,7 @@ if ($result) {
             backdrop-filter: blur(8px);
         }
         #map { 
-            height: calc(100vh - 130px); 
+            height: calc(100vh - 200px); 
             width: 100%; 
             border-radius: 16px; 
             box-shadow: 0 8px 25px rgba(0,0,0,0.3);
@@ -95,9 +95,23 @@ if ($result) {
             animation: pulse-red 1.5s infinite;
         }
 
+        .filter-card {
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 12px;
+            padding: 10px 15px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+        }
+
+        .leaflet-control-locate {
+            font-size: 16px; font-weight: bold; line-height: 30px; text-align: center;
+            cursor: pointer; display: block; width: 30px; height: 30px; color: #333;
+            text-decoration: none; background-color: #fff; border-bottom: 1px solid #ccc;
+        }
+        .leaflet-control-locate:hover { background-color: #f4f4f4; color: #0d6efd; }
+
         @media (max-width: 767.98px) {
-            #map { height: calc(100vh - 160px); }
-            .navbar-brand { font-size: 1rem !important; }
+            #map { height: calc(100vh - 240px); }
+            .navbar-brand { font-size: 0.95rem !important; }
         }
     </style>
 </head>
@@ -126,6 +140,31 @@ if ($result) {
     </nav>
 
     <div class="container-fluid container-md my-2 my-md-3">
+        
+        <!-- 🚨 แถบแจ้งเตือนด่วน (แสดงเมื่อมีการพบเห็นช้างป่าใน 1 ชั่วโมงล่าสุด) -->
+        <div id="alertBanner" class="alert alert-danger d-none align-items-center gap-2 mb-2 py-2 px-3 shadow-sm rounded-3" role="alert">
+            <i class="fa-solid fa-triangle-exclamation fa-lg text-danger"></i>
+            <div>
+                <strong>เตือนภัยด่วน!</strong> พบการรายงานช้างป่าในระยะเวลา 1 ชั่วโมงที่ผ่านมา กรุณาใช้ความระมัดระวังในการเดินทาง
+            </div>
+        </div>
+
+        <!-- 🔍 แถบกรองข้อมูล (Filter Tools) -->
+        <div class="filter-card mb-2 d-flex flex-wrap justify-content-between align-items-center gap-2">
+            <div class="d-flex align-items-center gap-2">
+                <label for="timeFilter" class="fw-bold small text-secondary mb-0"><i class="fa-solid fa-filter"></i> กรองเวลา:</label>
+                <select id="timeFilter" class="form-select form-select-sm" style="width: auto;">
+                    <option value="all">ทั้งหมด</option>
+                    <option value="1">1 ชั่วโมงล่าสุด (วิกฤต)</option>
+                    <option value="4">4 ชั่วโมงล่าสุด</option>
+                    <option value="24">24 ชั่วโมงล่าสุด</option>
+                </select>
+            </div>
+            <div id="reportCountBadge" class="badge bg-success py-2 px-3 rounded-pill">
+                แสดงทั้งหมด 0 รายการ
+            </div>
+        </div>
+
         <div id="map"></div>
 
         <!-- คำอธิบายสัญลักษณ์สี -->
@@ -155,6 +194,18 @@ if ($result) {
                 .replace(/>/g, "&gt;")
                 .replace(/"/g, "&quot;")
                 .replace(/'/g, "&#039;");
+        }
+
+        // คำนวณระยะห่างระหว่างพิกัด 2 จุด (กิโลเมตร)
+        function calculateDistance(lat1, lon1, lat2, lon2) {
+            const R = 6371; // รัศมีโลก (km)
+            const dLat = (lat2 - lat1) * Math.PI / 180;
+            const dLon = (lon2 - lon1) * Math.PI / 180;
+            const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+                      Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+                      Math.sin(dLon/2) * Math.sin(dLon/2);
+            const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+            return (R * c).toFixed(2);
         }
 
         const reportsData = <?= json_encode($reports, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP) ?>;
@@ -197,63 +248,157 @@ if ($result) {
             });
         }
 
-        const nowMs = Date.now();
-        let targetMarker = null;
+        const markersLayer = L.layerGroup().addTo(map);
+        let userLocation = null;
+        let userMarker = null;
 
-        reportsData.forEach(item => {
-            const lat = parseFloat(item.latitude);
-            const lng = parseFloat(item.longitude);
+        // ฟังก์ชันวาดหมุดบนแผนที่พร้อมกรองข้อมูลตามเวลา
+        function renderMarkers(filterHours = 'all') {
+            markersLayer.clearLayers();
+            const nowMs = Date.now();
+            let count = 0;
+            let hasRedAlert = false;
+            let targetMarker = null;
 
-            if (!isNaN(lat) && !isNaN(lng)) {
-                let statusColor = '#6c757d'; // สีเทา
-                let statusTitle = '🔘 ประวัติการพบเห็น (> 4 ชั่วโมง)';
-                let isRedAlert = false;
+            reportsData.forEach(item => {
+                const lat = parseFloat(item.latitude);
+                const lng = parseFloat(item.longitude);
 
-                if (item.timestamp_ms) {
-                    const diffInHours = (nowMs - parseFloat(item.timestamp_ms)) / (1000 * 60 * 60);
+                if (!isNaN(lat) && !isNaN(lng)) {
+                    let diffInHours = null;
+                    if (item.timestamp_ms) {
+                        diffInHours = (nowMs - parseFloat(item.timestamp_ms)) / (1000 * 60 * 60);
+                    }
 
-                    if (diffInHours >= -0.1 && diffInHours <= 1) {
-                        statusColor = '#dc3545'; // สีแดง
-                        statusTitle = '🚨 วิกฤต: พบใน 0-1 ชม.';
-                        isRedAlert = true;
-                    } else if (diffInHours > 1 && diffInHours <= 4) {
-                        statusColor = '#fd7e14'; // สีส้ม
-                        statusTitle = '⚠️ เฝ้าระวัง: พบใน 1-4 ชม.';
+                    // กรองข้อมูลตามตัวเลือกเวลา
+                    if (filterHours !== 'all' && diffInHours !== null) {
+                        if (diffInHours > parseFloat(filterHours)) {
+                            return; // ข้ามการแสดงผลถ้าระยะเวลาเกินกำหนด
+                        }
+                    }
+
+                    count++;
+
+                    let statusColor = '#6c757d'; // สีเทา
+                    let statusTitle = '🔘 ประวัติการพบเห็น (> 4 ชั่วโมง)';
+                    let isRedAlert = false;
+
+                    if (diffInHours !== null) {
+                        if (diffInHours >= -0.1 && diffInHours <= 1) {
+                            statusColor = '#dc3545'; // สีแดง
+                            statusTitle = '🚨 วิกฤต: พบใน 0-1 ชม.';
+                            isRedAlert = true;
+                            hasRedAlert = true;
+                        } else if (diffInHours > 1 && diffInHours <= 4) {
+                            statusColor = '#fd7e14'; // สีส้ม
+                            statusTitle = '⚠️ เฝ้าระวัง: พบใน 1-4 ชม.';
+                        }
+                    }
+
+                    const customIcon = createElephantMarkerIcon(statusColor, isRedAlert);
+
+                    const photoImg = item.photo_path 
+                        ? `<img src="${escapeHtml(item.photo_path)}" style="width:100%; border-radius:8px; margin-bottom:6px; max-height:120px; object-fit:cover;">` 
+                        : '';
+
+                    let distanceInfo = '';
+                    if (userLocation) {
+                        const dist = calculateDistance(userLocation.lat, userLocation.lng, lat, lng);
+                        distanceInfo = `<div style="font-size: 0.8rem; color: #0d6efd; margin-top: 4px;"><b>📍 ห่างจากคุณ:</b> ${dist} กม.</div>`;
+                    }
+
+                    const popupContent = `
+                        <div style="max-width: 200px;">
+                            <div style="font-size: 0.85rem; font-weight: bold; margin-bottom: 5px; color: ${statusColor};">
+                                ${escapeHtml(statusTitle)}
+                            </div>
+                            ${photoImg}
+                            <b>🐘 จำนวน:</b> ${escapeHtml(item.elephant_count)} ตัว<br>
+                            <b>พฤติกรรม:</b> ${escapeHtml(item.behavior_type || '-')}<br>
+                            <small style="color: #666;">${escapeHtml(item.details || '')}</small>
+                            ${distanceInfo}
+                        </div>
+                    `;
+
+                    const marker = L.marker([lat, lng], { icon: customIcon }).bindPopup(popupContent);
+                    markersLayer.addLayer(marker);
+
+                    if (highlightId > 0 && parseInt(item.report_id) === highlightId) {
+                        targetMarker = marker;
+                        map.setView([lat, lng], 14, { animate: true });
                     }
                 }
+            });
 
-                const customIcon = createElephantMarkerIcon(statusColor, isRedAlert);
+            // อัปเดตตัวเลขการแสดงผล
+            document.getElementById('reportCountBadge').innerText = `แสดงทั้งหมด ${count} รายการ`;
 
-                const photoImg = item.photo_path 
-                    ? `<img src="${escapeHtml(item.photo_path)}" style="width:100%; border-radius:8px; margin-bottom:6px; max-height:120px; object-fit:cover;">` 
-                    : '';
+            // แสดง/ซ่อน แถบเตือนภัยด่วน
+            const alertBanner = document.getElementById('alertBanner');
+            if (hasRedAlert) {
+                alertBanner.classList.remove('d-none');
+                alertBanner.classList.add('d-flex');
+            } else {
+                alertBanner.classList.add('d-none');
+                alertBanner.classList.remove('d-flex');
+            }
 
-                const popupContent = `
-                    <div style="max-width: 200px;">
-                        <div style="font-size: 0.85rem; font-weight: bold; margin-bottom: 5px; color: ${statusColor};">
-                            ${escapeHtml(statusTitle)}
-                        </div>
-                        ${photoImg}
-                        <b>🐘 จำนวน:</b> ${escapeHtml(item.elephant_count)} ตัว<br>
-                        <b>พฤติกรรม:</b> ${escapeHtml(item.behavior_type || '-')}<br>
-                        <small style="color: #666;">${escapeHtml(item.details || '')}</small>
-                    </div>
-                `;
+            if (targetMarker) {
+                setTimeout(() => {
+                    targetMarker.openPopup();
+                }, 500);
+            }
+        }
 
-                const marker = L.marker([lat, lng], { icon: customIcon }).addTo(map).bindPopup(popupContent);
+        // 🟢 เพิ่มปุ่มค้นหาตำแหน่งปัจจุบันของฉัน (Locate Me)
+        const zoomControlContainer = map.zoomControl.getContainer();
+        const locateBtn = L.DomUtil.create('a', 'leaflet-control-locate', zoomControlContainer);
+        locateBtn.innerHTML = '➢';
+        locateBtn.href = '#';
+        locateBtn.title = 'ตำแหน่งของฉัน';
 
-                if (highlightId > 0 && parseInt(item.report_id) === highlightId) {
-                    targetMarker = marker;
-                    map.setView([lat, lng], 14, { animate: true });
-                }
+        L.DomEvent.on(locateBtn, 'click', function(e) {
+            L.DomEvent.stopPropagation();
+            L.DomEvent.preventDefault();
+
+            if (navigator.geolocation) {
+                navigator.geolocation.getCurrentPosition(
+                    (position) => {
+                        const lat = position.coords.latitude;
+                        const lng = position.coords.longitude;
+                        userLocation = { lat, lng };
+
+                        if (userMarker) map.removeLayer(userMarker);
+
+                        userMarker = L.circleMarker([lat, lng], {
+                            radius: 8,
+                            fillColor: '#0d6efd',
+                            color: '#ffffff',
+                            weight: 2,
+                            opacity: 1,
+                            fillOpacity: 0.9
+                        }).addTo(map).bindPopup("📍 ตำแหน่งของคุณ").openPopup();
+
+                        map.setView([lat, lng], 12, { animate: true });
+                        
+                        // Re-render เพื่ออัปเดตระยะห่างใน Popup
+                        renderMarkers(document.getElementById('timeFilter').value);
+                    },
+                    () => {
+                        alert('ไม่สามารถระบุตำแหน่งของคุณได้ กรุณาเปิดบริการตำแหน่ง (GPS)');
+                    },
+                    { enableHighAccuracy: true, timeout: 10000 }
+                );
             }
         });
 
-        if (targetMarker) {
-            setTimeout(() => {
-                targetMarker.openPopup();
-            }, 500);
-        }
+        // Event Listener สำหรับตัวกรองเวลา
+        document.getElementById('timeFilter').addEventListener('change', function(e) {
+            renderMarkers(e.target.value);
+        });
+
+        // แสดงผลครั้งแรก
+        renderMarkers('all');
     </script>
 </body>
 </html>
