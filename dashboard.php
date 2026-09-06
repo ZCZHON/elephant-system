@@ -16,6 +16,11 @@ session_set_cookie_params([
 
 session_start();
 
+// ตัวแปรเช็กสิทธิ์สำหรับแสดง UI
+$is_logged_in = isset($_SESSION['user_id']);
+$user_role = $_SESSION['role'] ?? 'user';
+$user_name = $_SESSION['fullname'] ?? $_SESSION['user_name'] ?? 'ผู้ใช้งาน';
+
 // 🟢 1. รับค่าการกรองช่วงเวลา (Days Range: 7, 15, 30 หรือ all)
 $days = isset($_GET['range']) ? $_GET['range'] : '7';
 $date_condition = "";
@@ -111,14 +116,51 @@ if ($q_history) {
 </head>
 <body>
 
-    <!-- 🟢 NAVBAR -->
-    <nav class="navbar navbar-expand-lg navbar-dark nav-custom mb-3 shadow-sm border-bottom border-success">
+    <!-- 🟢 UNIFIED SYSTEM NAVBAR -->
+    <nav class="navbar navbar-expand-lg navbar-dark nav-custom mb-4 shadow-sm border-bottom border-success">
         <div class="container-fluid container-md">
-            <a class="navbar-brand fw-bold text-warning" href="index.php">📊 Dashboard ภาพรวม</a>
-            <div class="d-flex align-items-center gap-2">
-                <a href="index.php" class="btn btn-success btn-sm fw-bold">➕ แจ้งพบช้าง</a>
-                <a href="report.php" class="btn btn-outline-warning btn-sm fw-bold">📜 ประวัติรายงาน</a>
-                <a href="public_map.php" class="btn btn-outline-info btn-sm fw-bold">🗺️ แผนที่</a>
+            <a class="navbar-brand fw-bold text-warning fs-6" href="index.php">
+                🐘 <span class="d-none d-sm-inline">ระบบติดตามการกระจายตัวของช้างป่า</span>
+                <span class="d-inline d-sm-none">ติดตามช้างป่า</span>
+            </a>
+            
+            <div class="d-flex align-items-center gap-1 gap-sm-2">
+                <?php if ($is_logged_in): ?>
+                    <span class="text-white small me-1 d-none d-md-inline">
+                        👤 <?= htmlspecialchars($user_name) ?>
+                        <span class="badge bg-<?= $user_role === 'admin' ? 'danger' : 'success' ?> ms-1"><?= strtoupper($user_role) ?></span>
+                    </span>
+                <?php endif; ?>
+
+                <?php $current_page = basename($_SERVER['PHP_SELF']); ?>
+
+                <a href="index.php" class="btn btn-<?= $current_page === 'index.php' ? 'success' : 'outline-light' ?> btn-sm fw-bold">
+                    ➕ <span class="d-none d-sm-inline">ส่งรายงาน</span><span class="d-inline d-sm-none">รายงาน</span>
+                </a>
+
+                <a href="report.php" class="btn btn-<?= $current_page === 'report.php' ? 'warning' : 'outline-warning' ?> btn-sm fw-bold">
+                    📜 <span class="d-none d-sm-inline">ประวัติรายงาน</span><span class="d-inline d-sm-none">ประวัติ</span>
+                </a>
+
+                <a href="dashboard.php" class="btn btn-<?= $current_page === 'dashboard.php' ? 'info text-white' : 'outline-info' ?> btn-sm fw-bold">
+                    📊 <span class="d-none d-sm-inline">Dashboard</span><span class="d-inline d-sm-none">สถิติ</span>
+                </a>
+
+                <a href="public_map.php" class="btn btn-<?= $current_page === 'public_map.php' ? 'info text-white' : 'outline-info' ?> btn-sm fw-bold">
+                    🗺️ <span class="d-none d-sm-inline">แผนที่</span><span class="d-inline d-sm-none">แผนที่</span>
+                </a>
+
+                <?php if ($user_role === 'admin'): ?>
+                    <a href="admin_dashboard.php" class="btn btn-<?= $current_page === 'admin_dashboard.php' ? 'danger' : 'outline-danger' ?> btn-sm fw-bold shadow-sm">
+                        ⚙️ <span class="d-none d-sm-inline">จัดการระบบ</span><span class="d-inline d-sm-none">Admin</span>
+                    </a>
+                <?php endif; ?>
+
+                <?php if ($is_logged_in): ?>
+                    <a href="logout.php" class="btn btn-outline-danger btn-sm ms-1" title="ออกจากระบบ">🔴 <span class="d-none d-md-inline">ออก</span></a>
+                <?php else: ?>
+                    <a href="login.php" class="btn btn-success btn-sm ms-1 fw-bold">🔑 เข้าสู่ระบบ</a>
+                <?php endif; ?>
             </div>
         </div>
     </nav>
