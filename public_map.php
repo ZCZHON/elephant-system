@@ -60,7 +60,8 @@ $highlight_id = intval($_GET['highlight_id'] ?? 0);
 
 // ตัวแปรเช็กสิทธิ์สำหรับแสดง UI
 $is_logged_in = isset($_SESSION['user_id']);
-$is_admin = $is_logged_in && (($_SESSION['role'] ?? '') === 'admin');
+$user_role = $_SESSION['role'] ?? 'user';
+$user_name = $_SESSION['fullname'] ?? $_SESSION['user_name'] ?? 'ผู้ใช้งาน';
 ?>
 
 <!DOCTYPE html>
@@ -68,7 +69,7 @@ $is_admin = $is_logged_in && (($_SESSION['role'] ?? '') === 'admin');
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>ระบบติดตามการกระจายตัวของช้างป่าในประเทศไทย</title>
+    <title>แผนที่สาธารณะ - ติดตามการกระจายตัวของช้างป่า</title>
     
     <!-- Google Fonts, Bootstrap 5, FontAwesome -->
     <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -92,11 +93,9 @@ $is_admin = $is_logged_in && (($_SESSION['role'] ?? '') === 'admin');
             min-height: 100vh;
         }
         
-        /* Navbar หลัก */
-        .top-navbar {
+        .nav-custom {
             background-color: #0b150a;
-            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-            padding: 10px 0;
+            backdrop-filter: blur(8px);
         }
         
         .card-stat {
@@ -193,9 +192,6 @@ $is_admin = $is_logged_in && (($_SESSION['role'] ?? '') === 'admin');
 
         /* 📱 Mobile Responsive Styles */
         @media (max-width: 767.98px) {
-            .top-navbar {
-                padding: 8px 12px;
-            }
             #publicMap {
                 height: 42vh !important;
             }
@@ -222,36 +218,54 @@ $is_admin = $is_logged_in && (($_SESSION['role'] ?? '') === 'admin');
 </head>
 <body>
 
-    <!-- Header Navbar -->
-    <nav class="top-navbar">
-        <div class="container-fluid container-md d-flex justify-content-between align-items-center">
-            <a href="<?php echo $_SERVER['PHP_SELF']; ?>" class="text-white text-decoration-none fw-bold fs-6">
-                🐘 <span class="ms-1 d-none d-sm-inline">ระบบติดตามการกระจายตัวของช้างป่า</span>
-                <span class="ms-1 d-inline d-sm-none">เฝ้าระวังช้างป่า</span>
+    <!-- 🟢 UNIFIED SYSTEM NAVBAR -->
+    <nav class="navbar navbar-expand-lg navbar-dark nav-custom mb-3 shadow-sm border-bottom border-success">
+        <div class="container-fluid container-md">
+            <a class="navbar-brand fw-bold text-warning fs-6" href="index.php">
+                🐘 <span class="d-none d-sm-inline">ระบบติดตามการกระจายตัวของช้างป่า</span>
+                <span class="d-inline d-sm-none">ติดตามช้างป่า</span>
             </a>
             
             <div class="d-flex align-items-center gap-1 gap-sm-2">
-                <?php if ($is_admin): ?>
-                    <a href="admin_dashboard.php" class="btn btn-outline-success btn-sm fw-bold">
-                        <i class="fa-solid fa-sliders me-1"></i> <span class="d-none d-sm-inline">จัดการระบบ</span> Admin
+                <?php if ($is_logged_in): ?>
+                    <span class="text-white small me-1 d-none d-lg-inline">
+                        👤 <?= htmlspecialchars($user_name) ?>
+                        <span class="badge bg-<?= $user_role === 'admin' ? 'danger' : 'success' ?> ms-1"><?= strtoupper($user_role) ?></span>
+                    </span>
+                <?php endif; ?>
+
+                <?php $current_page = basename($_SERVER['PHP_SELF']); ?>
+
+                <a href="index.php" class="btn btn-<?= $current_page === 'index.php' ? 'success' : 'outline-light' ?> btn-sm fw-bold">
+                    ➕ <span class="d-none d-sm-inline">ส่งรายงาน</span><span class="d-inline d-sm-none">รายงาน</span>
+                </a>
+
+                <a href="report.php" class="btn btn-<?= $current_page === 'report.php' ? 'warning' : 'outline-warning' ?> btn-sm fw-bold">
+                    📜 <span class="d-none d-sm-inline">ประวัติรายงาน</span><span class="d-inline d-sm-none">ประวัติ</span>
+                </a>
+
+                <a href="dashboard.php" class="btn btn-<?= $current_page === 'dashboard.php' ? 'info text-white' : 'outline-info' ?> btn-sm fw-bold">
+                    📊 <span class="d-none d-sm-inline">Dashboard</span><span class="d-inline d-sm-none">สถิติ</span>
+                </a>
+
+                <a href="public_map.php" class="btn btn-<?= $current_page === 'public_map.php' ? 'info text-white' : 'outline-info' ?> btn-sm fw-bold">
+                    🗺️ <span class="d-none d-sm-inline">แผนที่</span><span class="d-inline d-sm-none">แผนที่</span>
+                </a>
+
+                <?php if ($user_role === 'admin'): ?>
+                    <a href="admin_dashboard.php" class="btn btn-<?= $current_page === 'admin_dashboard.php' ? 'danger' : 'outline-danger' ?> btn-sm fw-bold shadow-sm">
+                        ⚙️ <span class="d-none d-sm-inline">จัดการระบบ</span><span class="d-inline d-sm-none">Admin</span>
                     </a>
                 <?php endif; ?>
 
                 <?php if ($is_logged_in): ?>
-                    <a href="index.php" class="btn btn-success btn-sm fw-bold">
-                        <i class="fa-solid fa-plus me-1"></i> แจ้งพบช้าง
-                    </a>
-                    <a href="logout.php" class="btn btn-outline-danger btn-sm fw-bold">
-                        <i class="fa-solid fa-right-from-bracket me-1"></i> <span class="d-none d-sm-inline">ออกจากระบบ</span>
-                    </a>
+                    <a href="logout.php" class="btn btn-outline-danger btn-sm ms-1" title="ออกจากระบบ">🔴 <span class="d-none d-md-inline">ออก</span></a>
                 <?php else: ?>
-                    <a href="login.php" class="btn btn-success btn-sm fw-bold">
-                        <i class="fa-solid fa-right-to-bracket me-1"></i> เข้าสู่ระบบ
-                    </a>
+                    <a href="login.php" class="btn btn-success btn-sm ms-1 fw-bold">🔑 เข้าสู่ระบบ</a>
                 <?php endif; ?>
 
                 <!-- ปุ่มปิดหน้าต่าง LIFF -->
-                <button id="liffCloseBtn" onclick="liff.closeWindow()" class="btn btn-outline-light btn-sm fw-bold">
+                <button id="liffCloseBtn" onclick="liff.closeWindow()" class="btn btn-outline-light btn-sm fw-bold ms-1">
                     <i class="fa-solid fa-xmark me-1"></i> ปิด
                 </button>
             </div>
