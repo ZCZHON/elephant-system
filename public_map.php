@@ -4,40 +4,63 @@ date_default_timezone_set('Asia/Bangkok');
 
 include('db.php');
 
-// 🟢 ตั้งค่า Cookie ให้ตรงกับระบบ (รองรับ HTTPS และข้าม Frame/Domain)
+// 🟢 ตั้งค่า Cookie ให้รองรับ HTTPS และข้าม Frame/LIFF
 session_set_cookie_params([
     'lifetime' => 86400,
     'path' => '/',
     'domain' => '',
-    'secure' => true,      // บังคับใช้ HTTPS
-    'httponly' => true,    // ป้องกัน JavaScript เข้าถึง Cookie
-    'samesite' => 'None'   // อนุญาตให้ส่ง Cookie ข้าม Domain/LIFF ได้
+    'secure' => true,
+    'httponly' => true,
+    'samesite' => 'None'
 ]);
 
 session_start();
 
-$highlight_id = isset($_GET['highlight_id']) ? (int)$_GET['highlight_id'] : 0;
+// รับค่า Filter ช่วงเวลา
+$filter = $_GET['filter'] ?? 'all';
 
-// 🟢 ดึงเฉพาะรายงานที่ได้รับการยืนยัน (status = 'verified' หรือ 'approved')
-$query = "SELECT report_id, photo_path, latitude, longitude, elephant_count, behavior_type, details, reported_at 
-          FROM tbl_reports 
-          WHERE status IN ('verified', 'approved') 
-          ORDER BY reported_at DESC";
+$where_clause = "WHERE r.status IN ('verified', 'approved')";
+
+if ($filter === 'today') {
+    $where_clause .= " AND DATE(r.reported_at) = CURRENT_DATE";
+} elseif ($filter === '7days') {
+    $where_clause .= " AND r.reported_at >= NOW() - INTERVAL '7 days'";
+} elseif ($filter === '30days') {
+    $where_clause .= " AND r.reported_at >= NOW() - INTERVAL '30 days'";
+}
+
+// 1. ดึงข้อมูลรายงานที่ verified หรือ approved แล้ว
+$query = "SELECT r.*, 
+                 CONCAT(u.first_name, ' ', u.last_name) AS fullname 
+          FROM tbl_reports r 
+          LEFT JOIN tbl_users u ON r.user_id = u.user_id 
+          $where_clause
+          ORDER BY r.reported_at DESC";
 
 $result = pg_query($db, $query);
-$reports = [];
+$verified_reports = ($result) ? pg_fetch_all($result) ?: [] : [];
 
-if ($result) {
-    while ($row = pg_fetch_assoc($result)) {
-        if (!empty($row['reported_at'])) {
-            $time_stamp = strtotime($row['reported_at']);
-            $row['timestamp_ms'] = $time_stamp ? ($time_stamp * 1000) : null;
-        } else {
-            $row['timestamp_ms'] = null;
-        }
-        $reports[] = $row;
-    }
+// คำนวณสถิติ
+$total_spots = count($verified_reports);
+$total_elephants = 0;
+foreach ($verified_reports as $item) {
+    $total_elephants += intval($item['elephant_count'] ?? 1);
 }
+
+// 2. ดึงจำนวนอาสาสมัคร
+$query_users = "SELECT COUNT(*) AS total_volunteers FROM tbl_users"; 
+$res_users = pg_query($db, $query_users);
+$total_volunteers = 0;
+if ($res_users) {
+    $row_user = pg_fetch_assoc($res_users);
+    $total_volunteers = intval($row_user['total_volunteers'] ?? 0);
+}
+
+$highlight_id = intval($_GET['highlight_id'] ?? 0);
+
+// ตัวแปรเช็กสิทธิ์สำหรับแสดง UI
+$is_logged_in = isset($_SESSION['user_id']);
+$is_admin = $is_logged_in && (($_SESSION['role'] ?? '') === 'admin');
 ?>
 
 <!DOCTYPE html>
@@ -45,63 +68,118 @@ if ($result) {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>แผนที่สาธารณะ - ติดตามการกระจายตัวของช้างป่า</title>
+    <title>ระบบติดตามการกระจายตัวของช้างป่าในประเทศไทย</title>
     
-    <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;600;700&display=swap" rel="stylesheet">
+    <!-- Google Fonts, Bootstrap 5, FontAwesome -->
+    <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <!-- Leaflet CSS & JS -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    
+    <!-- LINE LIFF SDK -->
+    <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
 
     <style>
-        body { 
-            font-family: 'Sarabun', sans-serif; 
-            background-color: #1a2e1a;
-            color: #333;
+        body {
+            font-family: 'Sarabun', sans-serif;
+            background-color: #122111;
+            color: #fff;
+            margin: 0;
+            padding: 0;
             min-height: 100vh;
         }
-        .navbar-custom {
-            background-color: rgba(14, 34, 14, 0.95);
-            backdrop-filter: blur(8px);
+        
+        /* Navbar หลัก */
+        .top-navbar {
+            background-color: #0b150a;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            padding: 10px 0;
         }
-        #map { 
-            height: calc(100vh - 200px); 
-            width: 100%; 
-            border-radius: 16px; 
-            box-shadow: 0 8px 25px rgba(0,0,0,0.3);
-        }
-        .legend-card {
-            background: rgba(255, 255, 255, 0.95);
+        
+        .card-stat {
+            background: rgba(255, 255, 255, 0.08);
+            border: 1px solid rgba(255, 255, 255, 0.15);
             border-radius: 12px;
-            padding: 10px 15px;
-            box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+            padding: 12px;
+            backdrop-filter: blur(5px);
         }
-        .legend-color {
-            width: 14px;
-            height: 14px;
+        
+        .map-card {
+            background: #ffffff;
+            border-radius: 16px;
+            overflow: hidden;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+            color: #333;
+            position: relative;
+        }
+        
+        #publicMap {
+            height: 550px;
+            width: 100%;
+        }
+        
+        .list-card {
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 16px;
+            padding: 15px;
+            max-height: 550px;
+            overflow-y: auto;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        
+        .report-item {
+            background: rgba(255, 255, 255, 0.08);
+            border-radius: 10px;
+            padding: 12px;
+            margin-bottom: 10px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            border-left: 5px solid #6c757d;
+        }
+        .report-item.border-red { border-left-color: #dc3545 !important; }
+        .report-item.border-orange { border-left-color: #fd7e14 !important; }
+        .report-item.border-gray { border-left-color: #6c757d !important; }
+
+        .report-item:hover {
+            background: rgba(255, 255, 255, 0.18);
+        }
+        
+        .popup-img {
+            width: 100%;
+            height: 110px;
+            object-fit: cover;
+            border-radius: 8px;
+            margin-bottom: 8px;
+        }
+
+        .map-legend {
+            background: rgba(255, 255, 255, 0.95);
+            padding: 10px 12px;
+            border-radius: 10px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+            font-size: 0.8rem;
+            color: #333;
+            line-height: 1.4;
+        }
+        .legend-item {
+            display: flex;
+            align-items: center;
+            margin-bottom: 4px;
+        }
+        .legend-item:last-child { margin-bottom: 0; }
+        .color-dot {
+            width: 12px;
+            height: 12px;
             border-radius: 50%;
             display: inline-block;
-        }
-        .bg-red-alert { background-color: #dc3545; box-shadow: 0 0 6px rgba(220, 53, 69, 0.6); }
-        .bg-orange-warning { background-color: #fd7e14; }
-        .bg-gray-history { background-color: #6c757d; }
-
-        @keyframes pulse-red {
-            0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(220, 53, 69, 0.7); }
-            70% { transform: scale(1.1); box-shadow: 0 0 0 10px rgba(220, 53, 69, 0); }
-            100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(220, 53, 69, 0); }
-        }
-        .pulse-marker-red {
-            border-radius: 50%;
-            animation: pulse-red 1.5s infinite;
+            margin-right: 6px;
+            flex-shrink: 0;
         }
 
-        .filter-card {
-            background: rgba(255, 255, 255, 0.95);
-            border-radius: 12px;
-            padding: 10px 15px;
-            box-shadow: 0 4px 15px rgba(0,0,0,0.2);
-        }
-
+        /* ปุ่มค้นหาพิกัดผู้ใช้ */
         .leaflet-control-locate {
             font-size: 16px; font-weight: bold; line-height: 30px; text-align: center;
             cursor: pointer; display: block; width: 30px; height: 30px; color: #333;
@@ -109,254 +187,304 @@ if ($result) {
         }
         .leaflet-control-locate:hover { background-color: #f4f4f4; color: #0d6efd; }
 
+        #liffCloseBtn {
+            display: none;
+        }
+
+        /* 📱 Mobile Responsive Styles */
         @media (max-width: 767.98px) {
-            #map { height: calc(100vh - 240px); }
-            .navbar-brand { font-size: 0.95rem !important; }
+            .top-navbar {
+                padding: 8px 12px;
+            }
+            #publicMap {
+                height: 42vh !important;
+            }
+            .list-card {
+                max-height: 35vh !important;
+                padding: 10px;
+            }
+            .card-stat {
+                padding: 8px 6px;
+            }
+            .card-stat h2 {
+                font-size: 1.2rem !important;
+            }
+            .map-legend {
+                padding: 6px 8px;
+                font-size: 0.7rem;
+            }
+            .btn-group-sm > .btn {
+                padding: 0.25rem 0.4rem;
+                font-size: 0.75rem;
+            }
         }
     </style>
 </head>
 <body>
 
     <!-- Header Navbar -->
-    <nav class="navbar navbar-expand-lg navbar-dark navbar-custom shadow-sm border-bottom border-success">
-        <div class="container-fluid container-md">
-            <a class="navbar-brand fw-bold text-warning" href="#">
-                🐘 แผนที่เฝ้าระวังช้างป่า (Public Map)
+    <nav class="top-navbar">
+        <div class="container-fluid container-md d-flex justify-content-between align-items-center">
+            <a href="<?php echo $_SERVER['PHP_SELF']; ?>" class="text-white text-decoration-none fw-bold fs-6">
+                🐘 <span class="ms-1 d-none d-sm-inline">ระบบติดตามการกระจายตัวของช้างป่า</span>
+                <span class="ms-1 d-inline d-sm-none">เฝ้าระวังช้างป่า</span>
             </a>
             
-            <div class="d-flex align-items-center gap-2">
-                <?php if (isset($_SESSION['user_id'])): ?>
-                    <?php if (($_SESSION['role'] ?? '') === 'admin'): ?>
-                        <a href="admin_dashboard.php" class="btn btn-warning btn-sm fw-bold">⚙️ หน้า Admin</a>
-                    <?php else: ?>
-                        <a href="index.php" class="btn btn-success btn-sm fw-bold">➕ แจ้งพบช้าง</a>
-                    <?php endif; ?>
-                    <a href="logout.php" class="btn btn-outline-danger btn-sm fw-bold">ออกจากระบบ</a>
-                <?php else: ?>
-                    <a href="login.php" class="btn btn-success btn-sm fw-bold">💬 เข้าสู่ระบบ LINE</a>
+            <div class="d-flex align-items-center gap-1 gap-sm-2">
+                <?php if ($is_admin): ?>
+                    <a href="admin_dashboard.php" class="btn btn-outline-success btn-sm fw-bold">
+                        <i class="fa-solid fa-sliders me-1"></i> <span class="d-none d-sm-inline">จัดการระบบ</span> Admin
+                    </a>
                 <?php endif; ?>
+
+                <?php if ($is_logged_in): ?>
+                    <a href="index.php" class="btn btn-success btn-sm fw-bold">
+                        <i class="fa-solid fa-plus me-1"></i> แจ้งพบช้าง
+                    </a>
+                    <a href="logout.php" class="btn btn-outline-danger btn-sm fw-bold">
+                        <i class="fa-solid fa-right-from-bracket me-1"></i> <span class="d-none d-sm-inline">ออกจากระบบ</span>
+                    </a>
+                <?php else: ?>
+                    <a href="login.php" class="btn btn-success btn-sm fw-bold">
+                        <i class="fa-solid fa-right-to-bracket me-1"></i> เข้าสู่ระบบ
+                    </a>
+                <?php endif; ?>
+
+                <!-- ปุ่มปิดหน้าต่าง LIFF -->
+                <button id="liffCloseBtn" onclick="liff.closeWindow()" class="btn btn-outline-light btn-sm fw-bold">
+                    <i class="fa-solid fa-xmark me-1"></i> ปิด
+                </button>
             </div>
         </div>
     </nav>
 
     <div class="container-fluid container-md my-2 my-md-3">
         
-        <!-- 🚨 แถบแจ้งเตือนด่วน (แสดงเมื่อมีการพบเห็นช้างป่าใน 1 ชั่วโมงล่าสุด) -->
-        <div id="alertBanner" class="alert alert-danger d-none align-items-center gap-2 mb-2 py-2 px-3 shadow-sm rounded-3" role="alert">
-            <i class="fa-solid fa-triangle-exclamation fa-lg text-danger"></i>
-            <div>
-                <strong>เตือนภัยด่วน!</strong> พบการรายงานช้างป่าในระยะเวลา 1 ชั่วโมงที่ผ่านมา กรุณาใช้ความระมัดระวังในการเดินทาง
+        <!-- Header Section + Filter -->
+        <div class="row align-items-center mb-2 g-2">
+            <div class="col-5 col-md-6">
+                <h5 class="fw-bold text-success mb-0 fs-6 fs-md-5">
+                    <i class="fa-solid fa-map-location-dot me-1"></i> แผนที่สาธารณะ
+                </h5>
+            </div>
+            
+            <!-- ตัวกรองช่วงเวลา -->
+            <div class="col-7 col-md-6 text-end">
+                <div class="btn-group btn-group-sm" role="group">
+                    <a href="<?php echo $_SERVER['PHP_SELF']; ?>?filter=all" class="btn btn-outline-light <?php echo $filter === 'all' ? 'active fw-bold' : ''; ?>">ทั้งหมด</a>
+                    <a href="<?php echo $_SERVER['PHP_SELF']; ?>?filter=today" class="btn btn-outline-light <?php echo $filter === 'today' ? 'active fw-bold' : ''; ?>">วันนี้</a>
+                    <a href="<?php echo $_SERVER['PHP_SELF']; ?>?filter=7days" class="btn btn-outline-light <?php echo $filter === '7days' ? 'active fw-bold' : ''; ?>">7 วัน</a>
+                    <a href="<?php echo $_SERVER['PHP_SELF']; ?>?filter=30days" class="btn btn-outline-light <?php echo $filter === '30days' ? 'active fw-bold' : ''; ?>">30 วัน</a>
+                </div>
             </div>
         </div>
 
-        <!-- 🔍 แถบกรองข้อมูล (Filter Tools) -->
-        <div class="filter-card mb-2 d-flex flex-wrap justify-content-between align-items-center gap-2">
-            <div class="d-flex align-items-center gap-2">
-                <label for="timeFilter" class="fw-bold small text-secondary mb-0"><i class="fa-solid fa-filter"></i> กรองเวลา:</label>
-                <select id="timeFilter" class="form-select form-select-sm" style="width: auto;">
-                    <option value="all">ทั้งหมด</option>
-                    <option value="1">1 ชั่วโมงล่าสุด (วิกฤต)</option>
-                    <option value="4">4 ชั่วโมงล่าสุด</option>
-                    <option value="24">24 ชั่วโมงล่าสุด</option>
-                </select>
+        <!-- การ์ดสรุปสถิติ 3 ช่อง -->
+        <div class="row g-2 mb-2 mb-md-3">
+            <div class="col-4">
+                <div class="card-stat text-center text-md-start">
+                    <span class="text-white-50 small fw-bold">
+                        <i class="fa-solid fa-location-dot me-1 text-success"></i><span class="d-none d-sm-inline">จุดพบล่าสุด</span><span class="d-inline d-sm-none">จุดพบ</span>
+                    </span>
+                    <h2 class="fw-bold text-success mb-0 mt-1"><?php echo number_format($total_spots); ?> <small class="fs-6 text-white-50">จุด</small></h2>
+                </div>
             </div>
-            <div id="reportCountBadge" class="badge bg-success py-2 px-3 rounded-pill">
-                แสดงทั้งหมด 0 รายการ
+            <div class="col-4">
+                <div class="card-stat text-center text-md-start">
+                    <span class="text-white-50 small fw-bold">
+                        <i class="fa-solid fa-elephant me-1 text-warning"></i><span class="d-none d-sm-inline">จำนวนช้างรวม</span><span class="d-inline d-sm-none">ช้างรวม</span>
+                    </span>
+                    <h2 class="fw-bold text-warning mb-0 mt-1"><?php echo number_format($total_elephants); ?> <small class="fs-6 text-white-50">ตัว</small></h2>
+                </div>
+            </div>
+            <div class="col-4">
+                <div class="card-stat text-center text-md-start" style="border-left: 4px solid #0dcaf0;">
+                    <span class="text-white-50 small fw-bold">
+                        <i class="fa-solid fa-users me-1 text-info"></i><span class="d-none d-sm-inline">เครือข่ายอาสาสมัคร</span><span class="d-inline d-sm-none">อาสาสมัคร</span>
+                    </span>
+                    <h2 class="fw-bold text-info mb-0 mt-1"><?php echo number_format($total_volunteers); ?> <small class="fs-6 text-white-50">คน</small></h2>
+                </div>
             </div>
         </div>
 
-        <div id="map"></div>
+        <!-- แผนที่ และ รายการด้านข้าง -->
+        <div class="row g-2 g-md-3">
+            <!-- แผนที่ -->
+            <div class="col-lg-8">
+                <div class="map-card p-1 p-md-2">
+                    <div id="publicMap"></div>
+                </div>
+            </div>
 
-        <!-- คำอธิบายสัญลักษณ์สี -->
-        <div class="legend-card mt-2 d-flex flex-wrap justify-content-around align-items-center gap-2 small">
-            <div class="d-flex align-items-center gap-1">
-                <span class="legend-color bg-red-alert"></span>
-                <span><strong>สีแดง:</strong> วิกฤต (0 - 1 ชม.)</span>
-            </div>
-            <div class="d-flex align-items-center gap-1">
-                <span class="legend-color bg-orange-warning"></span>
-                <span><strong>สีส้ม:</strong> เฝ้าระวัง (1 - 4 ชม.)</span>
-            </div>
-            <div class="d-flex align-items-center gap-1">
-                <span class="legend-color bg-gray-history"></span>
-                <span><strong>สีเทา:</strong> ประวัติ (> 4 ชม.)</span>
+            <!-- รายการพบเห็นย้อนหลัง -->
+            <div class="col-lg-4">
+                <div class="list-card">
+                    <h6 class="fw-bold text-success mb-2 small">
+                        <i class="fa-solid fa-list-ul me-2"></i>รายการพบเห็นล่าสุด
+                    </h6>
+
+                    <?php if (!empty($verified_reports)): ?>
+                        <?php foreach ($verified_reports as $item): 
+                            $reported_time = strtotime($item['reported_at'] ?? $item['created_at'] ?? 'now');
+                            $diff_hours = (time() - $reported_time) / 3600;
+
+                            $border_class = 'border-gray';
+                            $badge_bg = 'bg-secondary';
+                            $status_text = 'ประวัติ (>4 ชม.)';
+
+                            if ($diff_hours <= 1) {
+                                $border_class = 'border-red';
+                                $badge_bg = 'bg-danger';
+                                $status_text = '🔴 วิกฤต (0-1 ชม.)';
+                            } elseif ($diff_hours <= 4) {
+                                $border_class = 'border-orange';
+                                $badge_bg = 'bg-warning text-dark';
+                                $status_text = '🟠 เฝ้าระวัง (1-4 ชม.)';
+                            }
+                        ?>
+                            <div class="report-item <?php echo $border_class; ?>" onclick="focusOnMap(<?php echo $item['latitude']; ?>, <?php echo $item['longitude']; ?>, <?php echo $item['report_id']; ?>)">
+                                <div class="d-flex justify-content-between align-items-start mb-1">
+                                    <span class="badge <?php echo $badge_bg; ?>" style="font-size: 0.7rem;"><?php echo $status_text; ?></span>
+                                    <small class="text-white-50" style="font-size: 0.75rem;">
+                                        <?php echo date('d/m/Y H:i', strtotime($item['reported_at'])); ?>
+                                    </small>
+                                </div>
+                                <div class="fw-bold text-white small mt-1">
+                                    🐘 พบช้าง <?php echo $item['elephant_count']; ?> ตัว | พฤติกรรม: <?php echo htmlspecialchars(($item['behavior_type'] ?? $item['behavior'] ?? '') ?: 'ไม่ระบุ'); ?>
+                                </div>
+                                <div class="text-white-50 small text-truncate mt-1" style="font-size: 0.8rem;">
+                                    <?php echo htmlspecialchars($item['details'] ?: 'ไม่มีรายละเอียดเพิ่มเติม'); ?>
+                                </div>
+                            </div>
+                        <?php endforeach; ?>
+                    <?php else: ?>
+                        <div class="text-center text-white-50 py-4">
+                            <i class="fa-solid fa-map-location-dot fa-2x mb-2 text-warning opacity-75"></i>
+                            <h6 class="fw-bold text-white mb-1 small">ไม่พบข้อมูลการแจ้งพบเห็น</h6>
+                            <p class="small mb-0 text-white-50">ไม่มีรายงานการพบเห็นช้างป่าในช่วงเวลานี้</p>
+                        </div>
+                    <?php endif; ?>
+                </div>
             </div>
         </div>
+
     </div>
 
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <!-- Script Leaflet & LIFF -->
     <script>
-        function escapeHtml(text) {
-            if (!text) return '';
-            return text.toString()
-                .replace(/&/g, "&amp;")
-                .replace(/</g, "&lt;")
-                .replace(/>/g, "&gt;")
-                .replace(/"/g, "&quot;")
-                .replace(/'/g, "&#039;");
-        }
+        const MY_LIFF_ID = "2011293676-4qqKadRs";
 
-        // คำนวณระยะห่างระหว่างพิกัด 2 จุด (กิโลเมตร)
-        function calculateDistance(lat1, lon1, lat2, lon2) {
-            const R = 6371; // รัศมีโลก (km)
-            const dLat = (lat2 - lat1) * Math.PI / 180;
-            const dLon = (lon2 - lon1) * Math.PI / 180;
-            const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
-                      Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
-                      Math.sin(dLon/2) * Math.sin(dLon/2);
-            const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-            return (R * c).toFixed(2);
-        }
+        // 🟢 ตรวจสอบ LINE LIFF
+        document.addEventListener("DOMContentLoaded", function() {
+            liff.init({ liffId: MY_LIFF_ID })
+                .then(() => {
+                    if (liff.isInClient()) {
+                        document.getElementById('liffCloseBtn').style.display = 'inline-block';
+                    }
+                })
+                .catch((err) => {
+                    console.log("LIFF Init Mode: Web Browser", err);
+                });
+        });
 
-        const reportsData = <?= json_encode($reports, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP) ?>;
-        const highlightId = <?= $highlight_id ?>;
-
-        const defaultLat = reportsData.length > 0 && !isNaN(parseFloat(reportsData[0].latitude)) ? parseFloat(reportsData[0].latitude) : 13.7563;
-        const defaultLng = reportsData.length > 0 && !isNaN(parseFloat(reportsData[0].longitude)) ? parseFloat(reportsData[0].longitude) : 100.5018;
-
-        const map = L.map('map').setView([defaultLat, defaultLng], 8);
+        // 🗺️ Leaflet Map Setup
+        var map = L.map('publicMap').setView([13.736717, 100.523186], 7);
 
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
             maxZoom: 18,
-            attribution: '© OpenStreetMap'
+            attribution: '© OpenStreetMap contributors'
         }).addTo(map);
 
-        function createElephantMarkerIcon(colorClass, isRedAlert = false) {
-            const pulseStyle = isRedAlert ? 'pulse-marker-red' : '';
+        function createElephantIcon(colorHex) {
             return L.divIcon({
-                className: 'custom-pin-container',
-                html: `
-                    <div class="${pulseStyle}" style="
-                        background-color: ${colorClass};
-                        width: 36px;
-                        height: 36px;
-                        border-radius: 50%;
-                        border: 2px solid white;
-                        box-shadow: 0 3px 8px rgba(0,0,0,0.4);
-                        display: flex;
-                        align-items: center;
-                        justify-content: center;
-                        font-size: 18px;
-                        color: white;
-                    ">
-                        🐘
-                    </div>
-                `,
-                iconSize: [36, 36],
-                iconAnchor: [18, 18],
-                popupAnchor: [0, -18]
+                className: 'custom-div-icon',
+                html: `<div style="
+                    background-color: ${colorHex};
+                    width: 28px;
+                    height: 28px;
+                    border-radius: 50%;
+                    border: 2px solid #ffffff;
+                    box-shadow: 0 3px 8px rgba(0,0,0,0.4);
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    font-size: 13px;
+                ">🐘</div>`,
+                iconSize: [28, 28],
+                iconAnchor: [14, 14],
+                popupAnchor: [0, -14]
             });
         }
 
-        const markersLayer = L.layerGroup().addTo(map);
-        let userLocation = null;
-        let userMarker = null;
+        var iconRed = createElephantIcon('#dc3545');    
+        var iconOrange = createElephantIcon('#fd7e14'); 
+        var iconGray = createElephantIcon('#6c757d');   
 
-        // ฟังก์ชันวาดหมุดบนแผนที่พร้อมกรองข้อมูลตามเวลา
-        function renderMarkers(filterHours = 'all') {
-            markersLayer.clearLayers();
-            const nowMs = Date.now();
-            let count = 0;
-            let hasRedAlert = false;
-            let targetMarker = null;
+        var reports = <?php echo json_encode($verified_reports); ?>;
+        var highlightId = <?php echo $highlight_id; ?>;
+        var markers = {};
+        var bounds = [];
+        var targetMarker = null;
 
-            reportsData.forEach(item => {
-                const lat = parseFloat(item.latitude);
-                const lng = parseFloat(item.longitude);
+        reports.forEach(function(item) {
+            if (item.latitude && item.longitude) {
+                var lat = parseFloat(item.latitude);
+                var lng = parseFloat(item.longitude);
+                
+                bounds.push([lat, lng]);
 
-                if (!isNaN(lat) && !isNaN(lng)) {
-                    let diffInHours = null;
-                    if (item.timestamp_ms) {
-                        diffInHours = (nowMs - parseFloat(item.timestamp_ms)) / (1000 * 60 * 60);
-                    }
+                var reportedAt = new Date(item.reported_at || item.created_at).getTime();
+                var now = new Date().getTime();
+                var diffHours = (now - reportedAt) / (1000 * 60 * 60);
 
-                    // กรองข้อมูลตามตัวเลือกเวลา
-                    if (filterHours !== 'all' && diffInHours !== null) {
-                        if (diffInHours > parseFloat(filterHours)) {
-                            return; // ข้ามการแสดงผลถ้าระยะเวลาเกินกำหนด
-                        }
-                    }
+                var selectedIcon = iconGray;
+                var statusBadge = '<span class="badge bg-secondary">⚪ ประวัติการพบเห็น (>4 ชม.)</span>';
 
-                    count++;
-
-                    let statusColor = '#6c757d'; // สีเทา
-                    let statusTitle = '🔘 ประวัติการพบเห็น (> 4 ชั่วโมง)';
-                    let isRedAlert = false;
-
-                    if (diffInHours !== null) {
-                        if (diffInHours >= -0.1 && diffInHours <= 1) {
-                            statusColor = '#dc3545'; // สีแดง
-                            statusTitle = '🚨 วิกฤต: พบใน 0-1 ชม.';
-                            isRedAlert = true;
-                            hasRedAlert = true;
-                        } else if (diffInHours > 1 && diffInHours <= 4) {
-                            statusColor = '#fd7e14'; // สีส้ม
-                            statusTitle = '⚠️ เฝ้าระวัง: พบใน 1-4 ชม.';
-                        }
-                    }
-
-                    const customIcon = createElephantMarkerIcon(statusColor, isRedAlert);
-
-                    const photoImg = item.photo_path 
-                        ? `<img src="${escapeHtml(item.photo_path)}" style="width:100%; border-radius:8px; margin-bottom:6px; max-height:120px; object-fit:cover;">` 
-                        : '';
-
-                    let distanceInfo = '';
-                    if (userLocation) {
-                        const dist = calculateDistance(userLocation.lat, userLocation.lng, lat, lng);
-                        distanceInfo = `<div style="font-size: 0.8rem; color: #0d6efd; margin-top: 4px;"><b>📍 ห่างจากคุณ:</b> ${dist} กม.</div>`;
-                    }
-
-                    const popupContent = `
-                        <div style="max-width: 200px;">
-                            <div style="font-size: 0.85rem; font-weight: bold; margin-bottom: 5px; color: ${statusColor};">
-                                ${escapeHtml(statusTitle)}
-                            </div>
-                            ${photoImg}
-                            <b>🐘 จำนวน:</b> ${escapeHtml(item.elephant_count)} ตัว<br>
-                            <b>พฤติกรรม:</b> ${escapeHtml(item.behavior_type || '-')}<br>
-                            <small style="color: #666;">${escapeHtml(item.details || '')}</small>
-                            ${distanceInfo}
-                        </div>
-                    `;
-
-                    const marker = L.marker([lat, lng], { icon: customIcon }).bindPopup(popupContent);
-                    markersLayer.addLayer(marker);
-
-                    if (highlightId > 0 && parseInt(item.report_id) === highlightId) {
-                        targetMarker = marker;
-                        map.setView([lat, lng], 14, { animate: true });
-                    }
+                if (diffHours <= 1) {
+                    selectedIcon = iconRed;
+                    statusBadge = '<span class="badge bg-danger">🔴 วิกฤต (พบภายใน 0-1 ชม.)</span>';
+                } else if (diffHours <= 4) {
+                    selectedIcon = iconOrange;
+                    statusBadge = '<span class="badge bg-warning text-dark">🟠 เฝ้าระวัง (พบภายใน 1-4 ชม.)</span>';
                 }
-            });
 
-            // อัปเดตตัวเลขการแสดงผล
-            document.getElementById('reportCountBadge').innerText = `แสดงทั้งหมด ${count} รายการ`;
+                var behaviorTxt = item.behavior_type || item.behavior || 'ไม่ระบุ';
+                var photoSrc = item.photo_path || item.image_path || '';
 
-            // แสดง/ซ่อน แถบเตือนภัยด่วน
-            const alertBanner = document.getElementById('alertBanner');
-            if (hasRedAlert) {
-                alertBanner.classList.remove('d-none');
-                alertBanner.classList.add('d-flex');
-            } else {
-                alertBanner.classList.add('d-none');
-                alertBanner.classList.remove('d-flex');
+                var popupContent = `
+                    <div style="width: 200px; color: #333;">
+                        ${photoSrc ? `<img src="${photoSrc}" class="popup-img" alt="รูปช้าง">` : ''}
+                        <div class="mb-2">${statusBadge}</div>
+                        <h6 class="fw-bold text-dark mb-1">🐘 พบช้าง ${item.elephant_count} ตัว</h6>
+                        <p class="small text-muted mb-1"><b>พฤติกรรม:</b> ${behaviorTxt}</p>
+                        <p class="small text-muted mb-1"><b>รายละเอียด:</b> ${item.details || '-'}</p>
+                        <hr class="my-1">
+                        <small class="text-secondary d-block">
+                            <i class="fa-regular fa-clock me-1"></i>${new Date(item.reported_at).toLocaleString('th-TH')}
+                        </small>
+                    </div>
+                `;
+
+                var marker = L.marker([lat, lng], {icon: selectedIcon})
+                    .addTo(map)
+                    .bindPopup(popupContent);
+
+                markers[item.report_id] = marker;
+
+                if (parseInt(item.report_id) === highlightId) {
+                    targetMarker = marker;
+                }
             }
+        });
 
-            if (targetMarker) {
-                setTimeout(() => {
-                    targetMarker.openPopup();
-                }, 500);
-            }
-        }
-
-        // 🟢 เพิ่มปุ่มค้นหาตำแหน่งปัจจุบันของฉัน (Locate Me)
+        // 🟢 เพิ่มปุ่มค้นหาพิกัดของผู้ใช้งาน (Locate Me) บนแผนที่
         const zoomControlContainer = map.zoomControl.getContainer();
         const locateBtn = L.DomUtil.create('a', 'leaflet-control-locate', zoomControlContainer);
         locateBtn.innerHTML = '➢';
         locateBtn.href = '#';
         locateBtn.title = 'ตำแหน่งของฉัน';
 
+        let userMarker = null;
         L.DomEvent.on(locateBtn, 'click', function(e) {
             L.DomEvent.stopPropagation();
             L.DomEvent.preventDefault();
@@ -364,13 +492,12 @@ if ($result) {
             if (navigator.geolocation) {
                 navigator.geolocation.getCurrentPosition(
                     (position) => {
-                        const lat = position.coords.latitude;
-                        const lng = position.coords.longitude;
-                        userLocation = { lat, lng };
+                        const userLat = position.coords.latitude;
+                        const userLng = position.coords.longitude;
 
                         if (userMarker) map.removeLayer(userMarker);
 
-                        userMarker = L.circleMarker([lat, lng], {
+                        userMarker = L.circleMarker([userLat, userLng], {
                             radius: 8,
                             fillColor: '#0d6efd',
                             color: '#ffffff',
@@ -379,10 +506,7 @@ if ($result) {
                             fillOpacity: 0.9
                         }).addTo(map).bindPopup("📍 ตำแหน่งของคุณ").openPopup();
 
-                        map.setView([lat, lng], 12, { animate: true });
-                        
-                        // Re-render เพื่ออัปเดตระยะห่างใน Popup
-                        renderMarkers(document.getElementById('timeFilter').value);
+                        map.setView([userLat, userLng], 12, { animate: true });
                     },
                     () => {
                         alert('ไม่สามารถระบุตำแหน่งของคุณได้ กรุณาเปิดบริการตำแหน่ง (GPS)');
@@ -392,13 +516,43 @@ if ($result) {
             }
         });
 
-        // Event Listener สำหรับตัวกรองเวลา
-        document.getElementById('timeFilter').addEventListener('change', function(e) {
-            renderMarkers(e.target.value);
-        });
+        // 🔔 ควบคุมการซูม
+        if (targetMarker) {
+            map.setView(targetMarker.getLatLng(), 14);
+            targetMarker.openPopup();
+        } else if (bounds.length > 0) {
+            map.fitBounds(bounds, {padding: [30, 30]});
+        }
 
-        // แสดงผลครั้งแรก
-        renderMarkers('all');
+        function focusOnMap(lat, lng, reportId) {
+            map.setView([lat, lng], 14, { animate: true });
+            if (markers[reportId]) {
+                markers[reportId].openPopup();
+            }
+        }
+
+        // สัญลักษณ์เตือนภัย Legend
+        var legend = L.control({position: 'topright'});
+        legend.onAdd = function (map) {
+            var div = L.DomUtil.create('div', 'map-legend');
+            div.innerHTML = `
+                <div class="fw-bold mb-1 border-bottom pb-1"><i class="fa-solid fa-layer-group me-1"></i>สัญลักษณ์</div>
+                <div class="legend-item">
+                    <span class="color-dot" style="background-color: #dc3545;"></span>
+                    <span><b>สีแดง:</b> วิกฤต (0-1 ชม.)</span>
+                </div>
+                <div class="legend-item">
+                    <span class="color-dot" style="background-color: #fd7e14;"></span>
+                    <span><b>สีส้ม:</b> เฝ้าระวัง (1-4 ชม.)</span>
+                </div>
+                <div class="legend-item">
+                    <span class="color-dot" style="background-color: #6c757d;"></span>
+                    <span><b>สีเทา:</b> ประวัติ (>4 ชม.)</span>
+                </div>
+            `;
+            return div;
+        };
+        legend.addTo(map);
     </script>
 </body>
 </html>
