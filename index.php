@@ -3,9 +3,20 @@
 date_default_timezone_set('Asia/Bangkok');
 
 include('db.php');
+
+// 🟢 ตั้งค่า Cookie ให้ตรงกับ login.php (รองรับ HTTPS และข้าม Frame/Domain)
+session_set_cookie_params([
+    'lifetime' => 86400,
+    'path' => '/',
+    'domain' => '',
+    'secure' => true,      // บังคับใช้ HTTPS
+    'httponly' => true,    // ป้องกัน JavaScript เข้าถึง Cookie
+    'samesite' => 'None'   // อนุญาตให้ส่ง Cookie ข้าม Domain/LIFF ได้
+]);
+
 session_start();
 
-// 🔒 1. ตรวจสอบการเข้าสู่ระบบ (ถ้าไม่มี Session ให้เด้งไป login.php)
+// 🔒 1. ตรวจสอบการเข้าสู่ระบบ (หากไม่มี Session และไม่ใช่ POST Request ให้เด้งไป login.php)
 if (!isset($_SESSION['user_id']) && $_SERVER['REQUEST_METHOD'] !== 'POST') {
     header("Location: login.php");
     exit;
@@ -210,21 +221,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         async function initLiff() {
             try {
                 await liff.init({ liffId: MY_LIFF_ID });
-                if (!liff.isLoggedIn()) {
-                    window.location.href = "login.php";
-                } else {
+                if (liff.isLoggedIn()) {
                     const profile = await liff.getProfile();
                     document.getElementById('line_userid').value = profile.userId;
                     document.getElementById('user_name').value = profile.displayName;
                     document.getElementById('line_user_display').innerText = '👤 ' + profile.displayName;
-                    
-                    const btn = document.getElementById('btnSubmit');
-                    btn.disabled = false;
-                    btn.innerText = 'ส่งรายงานข้อมูล';
                 }
             } catch (err) {
                 console.error("LIFF Initialization failed", err);
-                // หากรันในเบราว์เซอร์ปกติ ให้ปลดล็อกปุ่มกรณีมี Session อยู่แล้ว
+            } finally {
+                // ปลดล็อกปุ่มส่งข้อมูลเสมอเมื่อโหลดระบบเสร็จ
                 const btn = document.getElementById('btnSubmit');
                 btn.disabled = false;
                 btn.innerText = 'ส่งรายงานข้อมูล';
@@ -308,7 +314,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         icon: 'success', 
                         confirmButtonColor: '#198754' 
                     }).then(() => {
-                        if (liff.isLoggedIn()) {
+                        if (typeof liff !== 'undefined' && liff.isLoggedIn()) {
                             liff.closeWindow();
                         } else {
                             window.location.reload();
