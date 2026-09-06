@@ -145,11 +145,6 @@ if ($q_history) {
                 <a href="dashboard.php" class="btn btn-<?= $current_page === 'dashboard.php' ? 'info text-white' : 'outline-info' ?> btn-sm fw-bold">
                     📊 <span class="d-none d-sm-inline">Dashboard</span><span class="d-inline d-sm-none">สถิติ</span>
                 </a>
-
-                <a href="public_map.php" class="btn btn-<?= $current_page === 'public_map.php' ? 'info text-white' : 'outline-info' ?> btn-sm fw-bold">
-                    🗺️ <span class="d-none d-sm-inline">แผนที่</span><span class="d-inline d-sm-none">แผนที่</span>
-                </a>
-
                 <?php if ($user_role === 'admin'): ?>
                     <a href="admin_dashboard.php" class="btn btn-<?= $current_page === 'admin_dashboard.php' ? 'danger' : 'outline-danger' ?> btn-sm fw-bold shadow-sm">
                         ⚙️ <span class="d-none d-sm-inline">จัดการระบบ</span><span class="d-inline d-sm-none">Admin</span>
@@ -157,7 +152,7 @@ if ($q_history) {
                 <?php endif; ?>
 
                 <?php if ($is_logged_in): ?>
-                    <a href="logout.php" class="btn btn-outline-danger btn-sm ms-1" title="ออกจากระบบ">🔴 <span class="d-none d-md-inline">ออก</span></a>
+                    <a href="logout.php" class="btn btn-outline-danger btn-sm ms-1" title="ออกจากระบบ">🔴 <span class="d-none d-md-inline">ออกจากระบบ</span></a>
                 <?php else: ?>
                     <a href="login.php" class="btn btn-success btn-sm ms-1 fw-bold">🔑 เข้าสู่ระบบ</a>
                 <?php endif; ?>
