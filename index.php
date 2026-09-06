@@ -22,13 +22,17 @@ if (!isset($_SESSION['user_id']) && $_SERVER['REQUEST_METHOD'] !== 'POST') {
     exit;
 }
 
+// ตัวแปรข้อมูลผู้ใช้สำหรับแสดงบน Navbar
+$user_name = $_SESSION['fullname'] ?? $_SESSION['user_name'] ?? 'ผู้ใช้งาน LINE';
+$user_role = $_SESSION['role'] ?? 'user';
+
 // 🐘 2. ประมวลผลเมื่อมีการส่งฟอร์มรายงาน (POST Request)
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     // กำหนดให้ Output คืนค่ากลับเป็น JSON เสมอ
     header('Content-Type: application/json; charset=utf-8');
 
     $line_user_id   = trim($_POST['line_userid'] ?? '');
-    $user_name      = trim($_POST['user_name'] ?? 'ผู้ใช้งาน LINE');
+    $user_name_input = trim($_POST['user_name'] ?? 'ผู้ใช้งาน LINE');
     $latitude       = trim($_POST['latitude'] ?? '');
     $longitude      = trim($_POST['longitude'] ?? '');
     $elephant_count = (int)($_POST['elephant_count'] ?? 1);
@@ -58,7 +62,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             // สมาชิกใหม่ -> บันทึกลง tbl_users
             $insert_user = pg_query_params($db, 
                 "INSERT INTO tbl_users (line_user_id, first_name, last_name, registered_at, role) VALUES ($1, $2, '', NOW(), 'user') RETURNING user_id", 
-                array($line_user_id, $user_name)
+                array($line_user_id, $user_name_input)
             );
             
             if ($insert_user) {
@@ -132,7 +136,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         body { font-family: 'Sarabun', sans-serif; background: linear-gradient(rgba(14, 34, 14, 0.75), rgba(14, 34, 14, 0.75)), url('https://images.unsplash.com/photo-1516026672322-bc52d61a55d5?q=80&w=1920') no-repeat center center fixed; background-size: cover; min-height: 100vh; }
         .main-card { background: rgba(255, 255, 255, 0.96); border-radius: 24px; padding: 25px; box-shadow: 0 15px 35px rgba(0, 0, 0, 0.3); border: 2px solid #2e5a27; max-width: 800px; margin: auto; }
         #map { height: 300px; width: 100%; border-radius: 12px; border: 1px solid #ced4da; }
-        .nav-custom { background-color: rgba(14, 34, 14, 0.88); backdrop-filter: blur(8px); }
+        .nav-custom { background-color: rgba(14, 34, 14, 0.95); backdrop-filter: blur(8px); }
 
         .leaflet-control-locate {
             font-size: 16px; font-weight: bold; line-height: 30px; text-align: center;
@@ -144,16 +148,41 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 </head>
 <body>
 
-    <!-- 🟢 NAVBAR (ตัดปุ่ม public_map.php ออก เพื่อลดความสับสน) -->
-    <nav class="navbar navbar-expand-lg navbar-dark nav-custom mb-3 shadow-sm border-bottom border-success">
+    <!-- 🟢 UNIFIED SYSTEM NAVBAR -->
+    <nav class="navbar navbar-expand-lg navbar-dark nav-custom mb-4 shadow-sm border-bottom border-success">
         <div class="container-fluid container-md">
-            <a class="navbar-brand fw-bold text-warning fs-6" href="index.php">🐘 ระบบติดตามการประจายตัวของช้างป่า</a>
+            <a class="navbar-brand fw-bold text-warning fs-6" href="index.php">
+                🐘 <span class="d-none d-sm-inline">ระบบติดตามการกระจายตัวของช้างป่า</span>
+                <span class="d-inline d-sm-none">ติดตามช้างป่า</span>
+            </a>
+            
             <div class="d-flex align-items-center gap-1 gap-sm-2">
-                <span class="text-white small me-1 d-none d-md-inline" id="line_user_display">👤 <?= htmlspecialchars($_SESSION['fullname'] ?? 'ผู้ใช้งาน LINE') ?></span>
-                
-                <!-- ปุ่มแยกรายเมนู (เหลือเฉพาะ ประวัติรีพอร์ต และ แดชบอร์ด) -->
-                <a href="report.php" class="btn btn-outline-warning btn-sm fw-bold">📜 ประวัติรายงาน</a>
-                <a href="dashboard.php" class="btn btn-outline-light btn-sm fw-bold">📊 Dashboard</a>
+                <span class="text-white small d-none d-md-inline me-1" id="line_user_display">
+                    👤 <?= htmlspecialchars($user_name) ?>
+                    <span class="badge bg-<?= $user_role === 'admin' ? 'danger' : 'success' ?> ms-1"><?= strtoupper($user_role) ?></span>
+                </span>
+
+                <?php $current_page = basename($_SERVER['PHP_SELF']); ?>
+
+                <a href="index.php" class="btn btn-<?= $current_page === 'index.php' ? 'outline-light' : 'outline-light' ?> btn-sm fw-bold">
+                    ➕ <span class="d-none d-sm-inline">ส่งรายงาน</span><span class="d-inline d-sm-none">รายงาน</span>
+                </a>
+
+                <a href="report.php" class="btn btn-warning btn-sm fw-bold">
+                    📜 <span class="d-none d-sm-inline">ประวัติรายงาน</span><span class="d-inline d-sm-none">ประวัติ</span>
+                </a>
+
+                <a href="dashboard.php" class="btn btn-outline-light btn-sm fw-bold">
+                    📊 <span class="d-none d-sm-inline">Dashboard</span><span class="d-inline d-sm-none">สถิติ</span>
+                </a>
+
+                <?php if ($user_role === 'admin'): ?>
+                    <a href="admin_dashboard.php" class="btn btn-danger btn-sm fw-bold shadow-sm">
+                        ⚙️ <span class="d-none d-sm-inline">จัดการระบบ</span><span class="d-inline d-sm-none">Admin</span>
+                    </a>
+                <?php endif; ?>
+
+                <a href="logout.php" class="btn btn-outline-danger btn-sm ms-1" title="ออกจากระบบ">🔴 <span class="d-none d-md-inline">ออก</span></a>
             </div>
         </div>
     </nav>
@@ -232,7 +261,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     const profile = await liff.getProfile();
                     document.getElementById('line_userid').value = profile.userId;
                     document.getElementById('user_name').value = profile.displayName;
-                    document.getElementById('line_user_display').innerText = '👤 ' + profile.displayName;
+                    const displayElement = document.getElementById('line_user_display');
+                    if (displayElement) {
+                        displayElement.innerHTML = '👤 ' + profile.displayName + ' <span class="badge bg-<?= $user_role === "admin" ? "danger" : "success" ?> ms-1"><?= strtoupper($user_role) ?></span>';
+                    }
                 }
             } catch (err) {
                 console.error("LIFF Initialization failed", err);
