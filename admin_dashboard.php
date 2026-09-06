@@ -22,6 +22,42 @@ if (!isset($_SESSION['user_id']) || ($_SESSION['role'] ?? '') !== 'admin') {
     exit();
 }
 
+$alert_script = "";
+
+// ➕ ระบบประมวลผลเพิ่ม Admin ใหม่
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'add_admin') {
+    $username   = trim($_POST['username'] ?? '');
+    $first_name = trim($_POST['first_name'] ?? '');
+    $last_name  = trim($_POST['last_name'] ?? '');
+    $phone      = trim($_POST['phone_number'] ?? '');
+    $raw_pass   = trim($_POST['password'] ?? '');
+
+    if (!empty($username) && !empty($raw_pass)) {
+        // เช็ก username ซ้ำในระบบ
+        $check_q = "SELECT user_id FROM tbl_users WHERE username = $1";
+        $check_res = pg_query_params($db, $check_q, array($username));
+
+        if ($check_res && pg_num_rows($check_res) > 0) {
+            $alert_script = "Swal.fire('เกิดข้อผิดพลาด', 'ชื่อผู้ใช้งาน (Username) นี้มีในระบบแล้ว', 'warning');";
+        } else {
+            // Hash รหัสผ่านเพื่อความปลอดภัย
+            $password_hash = password_hash($raw_pass, PASSWORD_DEFAULT);
+
+            $insert_q = "INSERT INTO tbl_users (username, password, first_name, last_name, phone_number, role, registered_at) 
+                         VALUES ($1, $2, $3, $4, $5, 'admin', NOW())";
+            $insert_res = pg_query_params($db, $insert_q, array($username, $password_hash, $first_name, $last_name, $phone));
+
+            if ($insert_res) {
+                $alert_script = "Swal.fire('สำเร็จ!', 'เพิ่มเจ้าหน้าที่ Admin คนใหม่เรียบร้อยแล้ว', 'success');";
+            } else {
+                $alert_script = "Swal.fire('เกิดข้อผิดพลาด', 'ไม่สามารถบันทึกข้อมูลลงฐานข้อมูลได้', 'error');";
+            }
+        }
+    } else {
+        $alert_script = "Swal.fire('คำเตือน', 'กรุณากรอก Username และ Password ให้ครบถ้วน', 'warning');";
+    }
+}
+
 // 1. ดึงข้อมูลรายงานแจ้งเหตุทั้งหมด
 $query = "SELECT r.*, 
                  CONCAT(u.first_name, ' ', u.last_name) AS fullname,
@@ -144,14 +180,19 @@ foreach ($reports as $r) {
 
     <div class="container-fluid container-md my-4">
         
-        <!-- Header -->
-        <div class="d-flex justify-content-between align-items-center mb-3">
+        <!-- Header + ปุ่มเพิ่ม Admin -->
+        <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
             <div>
                 <h4 class="fw-bold text-dark mb-0">
                     <i class="fa-solid fa-sliders me-2 text-success"></i>ระบบจัดการรายงานช้างป่า
                 </h4>
                 <p class="text-muted small mb-0 d-none d-sm-block">ตรวจสอบและยืนยันข้อมูลจากอาสาสมัครก่อนแสดงบนแผนที่สาธารณะ</p>
             </div>
+            
+            <!-- ปุ่มเปิด Modal เพิ่ม Admin -->
+            <button type="button" class="btn btn-success btn-sm fw-bold shadow-sm" data-bs-toggle="modal" data-bs-target="#addAdminModal">
+                <i class="fa-solid fa-user-plus me-1"></i> เพิ่ม Admin ใหม่
+            </button>
         </div>
 
         <!-- สรุปสถิติ 4 ช่อง -->
@@ -295,6 +336,53 @@ foreach ($reports as $r) {
         </div>
     </div>
 
+    <!-- ➕ Modal ฟอร์มเพิ่ม Admin ใหม่ -->
+    <div class="modal fade" id="addAdminModal" tabindex="-1" aria-labelledby="addAdminModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <form action="admin_dashboard.php" method="POST">
+                    <input type="hidden" name="action" value="add_admin">
+                    <div class="modal-header bg-success text-white py-2">
+                        <h6 class="modal-title fw-bold" id="addAdminModalLabel">
+                            <i class="fa-solid fa-user-plus me-2"></i>เพิ่มบัญชีเจ้าหน้าที่ (Admin)
+                        </h6>
+                        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                    </div>
+                    <div class="modal-body">
+                        <div class="mb-3">
+                            <label class="form-label small fw-bold text-secondary">ชื่อผู้ใช้งาน (Username) <span class="text-danger">*</span></label>
+                            <input type="text" name="username" class="form-control" placeholder="เช่น officer01" required>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label small fw-bold text-secondary">รหัสผ่าน (Password) <span class="text-danger">*</span></label>
+                            <input type="password" name="password" class="form-control" placeholder="กรอกรหัสผ่านอย่างน้อย 6 ตัวอักษร" required>
+                        </div>
+                        <div class="row g-2 mb-3">
+                            <div class="col-6">
+                                <label class="form-label small fw-bold text-secondary">ชื่อจริง</label>
+                                <input type="text" name="first_name" class="form-control" placeholder="ชื่อ">
+                            </div>
+                            <div class="col-6">
+                                <label class="form-label small fw-bold text-secondary">นามสกุล</label>
+                                <input type="text" name="last_name" class="form-control" placeholder="นามสกุล">
+                            </div>
+                        </div>
+                        <div class="mb-2">
+                            <label class="form-label small fw-bold text-secondary">เบอร์โทรศัพท์</label>
+                            <input type="tel" name="phone_number" class="form-control" placeholder="08X-XXX-XXXX">
+                        </div>
+                    </div>
+                    <div class="modal-footer py-2">
+                        <button type="button" class="btn btn-secondary btn-sm fw-bold" data-bs-dismiss="modal">ยกเลิก</button>
+                        <button type="submit" class="btn btn-success btn-sm fw-bold px-3">
+                            <i class="fa-solid fa-save me-1"></i>บันทึก Admin ใหม่
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
     <!-- 🖼️ Modal ป๊อปอัปขยายรูปภาพ -->
     <div class="modal fade" id="imagePreviewModal" tabindex="-1" aria-labelledby="imagePreviewLabel" aria-hidden="true">
         <div class="modal-dialog modal-dialog-centered modal-lg">
@@ -320,6 +408,9 @@ foreach ($reports as $r) {
     <!-- Bootstrap 5 JS Bundle -->
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script>
+        // 🔔 เรียกใช้ SweetAlert2 จากฝั่ง PHP
+        <?php if (!empty($alert_script)) echo $alert_script; ?>
+
         // 🖼️ เปิด Modal แสดงรูปใหญ่
         function openImageModal(imageSrc) {
             document.getElementById('modalImageTarget').src = imageSrc;
