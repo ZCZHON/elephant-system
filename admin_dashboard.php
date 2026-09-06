@@ -1,8 +1,22 @@
 <?php
+// กำหนด Timezone ระดับ PHP
+date_default_timezone_set('Asia/Bangkok');
+
 include('db.php');
+
+// 🟢 ตั้งค่า Cookie ให้ตรงกับ login.php (รองรับ HTTPS และข้าม Frame/Domain)
+session_set_cookie_params([
+    'lifetime' => 86400,
+    'path' => '/',
+    'domain' => '',
+    'secure' => true,      // บังคับใช้ HTTPS
+    'httponly' => true,    // ป้องกัน JavaScript เข้าถึง Cookie
+    'samesite' => 'None'   // อนุญาตให้ส่ง Cookie ข้าม Domain/LIFF ได้
+]);
+
 session_start();
 
-// 🔒 ล็อกความปลอดภัย: ถ้าไม่ได้ล็อกอิน หรือไม่ได้เป็น admin ให้เด้งไปหน้า login
+// 🔒 ล็อกความปลอดภัย: ถ้าไม่ได้ล็อกอิน หรือไม่ได้เป็น admin ให้เด้งไปหน้า login.php
 if (!isset($_SESSION['user_id']) || ($_SESSION['role'] ?? '') !== 'admin') {
     header("Location: login.php");
     exit();
@@ -40,10 +54,11 @@ foreach ($reports as $r) {
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>ระบบจัดการข้อมูลสำหรับเจ้าหน้าที่ (Admin Dashboard)</title>
     
-    <!-- Google Fonts, Bootstrap 5, FontAwesome -->
+    <!-- Google Fonts, Bootstrap 5, FontAwesome, SweetAlert2 -->
     <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
 
     <style>
         body {
@@ -104,7 +119,7 @@ foreach ($reports as $r) {
     <!-- Header Navbar -->
     <nav class="navbar navbar-expand-lg navbar-dark navbar-admin shadow-sm">
         <div class="container-fluid container-md">
-            <a class="navbar-brand fw-bold" href="<?php echo $_SERVER['PHP_SELF']; ?>">
+            <a class="navbar-brand fw-bold" href="admin_dashboard.php">
                 🐘 Admin Management
             </a>
             
@@ -213,9 +228,9 @@ foreach ($reports as $r) {
                                     </td>
 
                                     <td>
-                                        <div class="fw-bold text-dark small"><?php echo htmlspecialchars($row['fullname'] ?: 'ไม่ระบุชื่อ'); ?></div>
-                                        <a href="tel:<?php echo htmlspecialchars($row['phone_number']); ?>" class="text-decoration-none text-muted small">
-                                            <i class="fa-solid fa-phone fa-xs me-1"></i><?php echo htmlspecialchars($row['phone_number'] ?: '-'); ?>
+                                        <div class="fw-bold text-dark small"><?php echo htmlspecialchars($row['fullname'] ?: 'ผู้ใช้งาน LINE'); ?></div>
+                                        <a href="tel:<?php echo htmlspecialchars($row['phone_number'] ?? ''); ?>" class="text-decoration-none text-muted small">
+                                            <i class="fa-solid fa-phone fa-xs me-1"></i><?php echo htmlspecialchars(($row['phone_number'] ?? '') ?: '-'); ?>
                                         </a>
                                     </td>
 
@@ -302,7 +317,7 @@ foreach ($reports as $r) {
         </div>
     </div>
 
-    <!-- Bootstrap 5 JS Bundle & JavaScript -->
+    <!-- Bootstrap 5 JS Bundle -->
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script>
         // 🖼️ เปิด Modal แสดงรูปใหญ่
@@ -312,38 +327,65 @@ foreach ($reports as $r) {
             imageModal.show();
         }
 
-        // ⚡ อัปเดตสถานะ อนุมัติ / ปฏิเสธ
+        // ⚡ อัปเดตสถานะ อนุมัติ / ปฏิเสธ (ใช้ SweetAlert2)
         function updateStatus(reportId, newStatus) {
             var actionText = newStatus === 'verified' ? 'อนุมัติ' : 'ปฏิเสธ';
-            
-            if (confirm(`คุณต้องการ "${actionText}" รายการนี้ใช่หรือไม่?`)) {
-                fetch('update_status.php', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                    body: `report_id=${reportId}&status=${newStatus}`
-                })
-                .then(response => response.json())
-                .then(data => {
-                    if (data.success) {
-                        var badgeCell = document.getElementById('status-badge-' + reportId);
-                        
-                        if (newStatus === 'verified') {
-                            badgeCell.innerHTML = '<span class="badge bg-success"><i class="fa-solid fa-check me-1"></i>Verified</span>';
-                            if (confirm('อนุมัติข้อมูลเรียบร้อยแล้ว! ต้องการเปิดไปดูตำแหน่งช้างบนแผนที่สาธารณะเลยหรือไม่?')) {
-                                window.location.href = 'public_map.php?highlight_id=' + reportId;
+            var confirmBtnColor = newStatus === 'verified' ? '#198754' : '#dc3545';
+
+            Swal.fire({
+                title: `ยืนยันการ${actionText}?`,
+                text: `คุณต้องการ "${actionText}" รายการแจ้งเหตุนี้ใช่หรือไม่?`,
+                icon: 'question',
+                showCancelButton: true,
+                confirmButtonColor: confirmBtnColor,
+                cancelButtonColor: '#6c757d',
+                confirmButtonText: `ใช่, ${actionText}`,
+                cancelButtonText: 'ยกเลิก'
+            }).then((result) => {
+                if (result.isConfirmed) {
+                    Swal.fire({ title: 'กำลังอัปเดตข้อมูล...', allowOutsideClick: false, didOpen: () => { Swal.showLoading(); } });
+
+                    fetch('update_status.php', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                        body: `report_id=${reportId}&status=${newStatus}`
+                    })
+                    .then(response => response.json())
+                    .then(data => {
+                        Swal.close();
+                        if (data.success) {
+                            var badgeCell = document.getElementById('status-badge-' + reportId);
+                            
+                            if (newStatus === 'verified') {
+                                badgeCell.innerHTML = '<span class="badge bg-success"><i class="fa-solid fa-check me-1"></i>Verified</span>';
+                                Swal.fire({
+                                    title: 'อนุมัติเรียบร้อยแล้ว!',
+                                    text: 'ต้องการเปิดไปดูตำแหน่งช้างบนแผนที่สาธารณะเลยหรือไม่?',
+                                    icon: 'success',
+                                    showCancelButton: true,
+                                    confirmButtonColor: '#198754',
+                                    confirmButtonText: 'เปิดแผนที่',
+                                    cancelButtonText: 'อยู่ในหน้านี้ต่อ'
+                                }).then((mapResult) => {
+                                    if (mapResult.isConfirmed) {
+                                        window.location.href = 'public_map.php?highlight_id=' + reportId;
+                                    }
+                                });
+                            } else {
+                                badgeCell.innerHTML = '<span class="badge bg-danger"><i class="fa-solid fa-xmark me-1"></i>Rejected</span>';
+                                Swal.fire('ปฏิเสธรายการแล้ว', 'อัปเดตสถานะเป็น Rejected เรียบร้อย', 'info');
                             }
                         } else {
-                            badgeCell.innerHTML = '<span class="badge bg-danger"><i class="fa-solid fa-xmark me-1"></i>Rejected</span>';
+                            Swal.fire('เกิดข้อผิดพลาด', data.message || 'ไม่สามารถอัปเดตสถานะได้', 'error');
                         }
-                    } else {
-                        alert('เกิดข้อผิดพลาด: ' + (data.message || 'ไม่สามารถอัปเดตสถานะได้'));
-                    }
-                })
-                .catch(error => {
-                    console.error('Error:', error);
-                    alert('เกิดข้อผิดพลาดในการเชื่อมต่อเซิร์ฟเวอร์');
-                });
-            }
+                    })
+                    .catch(error => {
+                        Swal.close();
+                        console.error('Error:', error);
+                        Swal.fire('เกิดข้อผิดพลาด', 'ไม่สามารถเชื่อมต่อเซิร์ฟเวอร์ได้', 'error');
+                    });
+                }
+            });
         }
     </script>
 </body>
