@@ -1,5 +1,19 @@
 <?php
+// กำหนด Timezone ระดับ PHP
+date_default_timezone_set('Asia/Bangkok');
+
 include('db.php');
+
+// 🟢 ตั้งค่า Cookie ให้ตรงกับระบบ (รองรับ HTTPS และข้าม Frame/Domain)
+session_set_cookie_params([
+    'lifetime' => 86400,
+    'path' => '/',
+    'domain' => '',
+    'secure' => true,      // บังคับใช้ HTTPS
+    'httponly' => true,    // ป้องกัน JavaScript เข้าถึง Cookie
+    'samesite' => 'None'   // อนุญาตให้ส่ง Cookie ข้าม Domain/LIFF ได้
+]);
+
 session_start();
 
 header('Content-Type: application/json; charset=utf-8');
@@ -10,7 +24,7 @@ if (!isset($_SESSION['user_id']) || ($_SESSION['role'] ?? '') !== 'admin') {
     exit();
 }
 
-// 2. รับค่า
+// 2. รับค่า (รองรับทั้ง POST Form-Data และ JSON Payload)
 $input = json_decode(file_get_contents('php://input'), true);
 $report_id = intval($_POST['report_id'] ?? $input['report_id'] ?? 0);
 $status    = trim($_POST['status'] ?? $input['status'] ?? '');
@@ -33,10 +47,9 @@ if ($result) {
 
     if ($status === 'verified') {
         $message = 'ยืนยันข้อมูลเรียบร้อย! กำลังนำคุณไปยังหน้าแผนที่สาธารณะ...';
-        // 🗺️ ใส่ชื่อไฟล์หน้าแผนที่สาธารณะของคุณตรงนี้ (เช่น public_map.php หรือ dashboard.php)
         $redirect_url = 'public_map.php?highlight_id=' . $report_id; 
     } elseif ($status === 'rejected') {
-        $message = 'ระบุเป็นข้อมูลเท็จเรียบร้อยแล้ว';
+        $message = 'ปฏิเสธรายงานเรียบร้อยแล้ว';
     }
 
     echo json_encode([
