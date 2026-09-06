@@ -1,17 +1,30 @@
 <?php
+// กำหนด Timezone ระดับ PHP
+date_default_timezone_set('Asia/Bangkok');
+
 include('db.php');
+
+// 🟢 ตั้งค่า Cookie ให้ตรงกับระบบ (รองรับ HTTPS และข้าม Frame/Domain)
+session_set_cookie_params([
+    'lifetime' => 86400,
+    'path' => '/',
+    'domain' => '',
+    'secure' => true,      // บังคับใช้ HTTPS
+    'httponly' => true,    // ป้องกัน JavaScript เข้าถึง Cookie
+    'samesite' => 'None'   // อนุญาตให้ส่ง Cookie ข้าม Domain/LIFF ได้
+]);
+
 session_start();
 
-// 🔒 ตรวจสอบการเข้าสู่ระบบ (ถ้าเชื่อม LIFF แล้ว สามารถดึง user_id จาก Session หรือ Line Profile ได้)
-$user_id   = $_SESSION['user_id'] ?? null;
+// 🔒 ตรวจสอบการเข้าสู่ระบบ (ถ้าไม่มี Session ให้รีไดเรกต์ไปหน้า login.php)
+if (!isset($_SESSION['user_id'])) {
+    header("Location: login.php");
+    exit;
+}
+
+$user_id   = $_SESSION['user_id'];
 $user_name = $_SESSION['fullname'] ?? 'ผู้ใช้งานระบบ';
 $user_role = $_SESSION['role'] ?? 'user';
-
-// ถ้าไม่มี session ล็อกอิน (กรณีเปิดผ่าน LIFF โดยตรง)
-if (!$user_id) {
-    // สามารถจัดการ fallback หรือ redirect ไปหน้า login/register ได้
-    // header("Location: login.php");
-}
 
 // 🎯 ดึงข้อมูลรายงานเฉพาะของคนที่ล็อกอินอยู่ ($user_id)
 $reports = [];
@@ -97,7 +110,7 @@ if ($user_id) {
     <!-- 🟢 NAVBAR -->
     <nav class="navbar navbar-expand-lg navbar-dark nav-custom mb-4 shadow-sm border-bottom border-success">
         <div class="container">
-            <a class="navbar-brand fw-bold text-warning" href="index.php">🐘 ระบบติดตามการกระจายตัวของช้างป่าในประเทศไทย</a>
+            <a class="navbar-brand fw-bold text-warning" href="index.php">🐘 ระบบติดตามการกระจายตัวของช้างป่า</a>
             
             <div class="d-flex align-items-center gap-2">
                 <span class="text-white small d-none d-md-inline me-1">
@@ -153,7 +166,7 @@ if ($user_id) {
                                 <?php $report_id = $row['report_id'] ?? $row['id'] ?? 0; ?>
                                 <tr>
                                     <td class="text-center">
-                                        <?php if (!empty($row['photo_path']) && file_exists($row['photo_path'])): ?>
+                                        <?php if (!empty($row['photo_path'])): ?>
                                             <img src="<?= htmlspecialchars($row['photo_path']) ?>" class="img-thumb" onclick="showImage('<?= htmlspecialchars($row['photo_path']) ?>')">
                                         <?php else: ?>
                                             <span class="text-muted small">-</span>
@@ -167,7 +180,7 @@ if ($user_id) {
                                     
                                     <!-- แสดงสถานะการอนุมัติ -->
                                     <td class="text-center">
-                                        <?php if ($row['status'] === 'verified'): ?>
+                                        <?php if ($row['status'] === 'verified' || $row['status'] === 'approved'): ?>
                                             <span class="badge bg-success">อนุมัติแล้ว</span>
                                         <?php elseif ($row['status'] === 'rejected'): ?>
                                             <span class="badge bg-danger">ไม่ผ่าน</span>
