@@ -114,10 +114,10 @@ if ($q_history) {
     <!-- 🟢 NAVBAR -->
     <nav class="navbar navbar-expand-lg navbar-dark nav-custom mb-3 shadow-sm border-bottom border-success">
         <div class="container-fluid container-md">
-            <a class="navbar-brand fw-bold text-warning" href="index.php">📊 แดชบอร์ดภาพรวม</a>
+            <a class="navbar-brand fw-bold text-warning" href="index.php">📊 Dashboard ภาพรวม</a>
             <div class="d-flex align-items-center gap-2">
                 <a href="index.php" class="btn btn-success btn-sm fw-bold">➕ แจ้งพบช้าง</a>
-                <a href="report.php" class="btn btn-outline-warning btn-sm fw-bold">📜 ประวัติรีพอร์ต</a>
+                <a href="report.php" class="btn btn-outline-warning btn-sm fw-bold">📜 ประวัติรายงาน</a>
                 <a href="public_map.php" class="btn btn-outline-info btn-sm fw-bold">🗺️ แผนที่</a>
             </div>
         </div>
