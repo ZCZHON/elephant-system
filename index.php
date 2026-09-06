@@ -182,7 +182,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     </a>
                 <?php endif; ?>
 
-                <a href="logout.php" class="btn btn-outline-danger btn-sm ms-1" title="ออกจากระบบ">🔴 <span class="d-none d-md-inline">ออก</span></a>
+                <a href="logout.php" class="btn btn-outline-danger btn-sm ms-1" title="ออกจากระบบ">🔴 <span class="d-none d-md-inline">ออกจากระบบ</span></a>
             </div>
         </div>
     </nav>
