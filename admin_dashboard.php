@@ -200,7 +200,7 @@ foreach ($reports as $r) {
                 </a>
 
                 <a href="public_map.php" class="btn btn-outline-info btn-sm fw-bold">
-                    🗺️ <span class="d-none d-sm-inline">แผนที่</span><span class="d-inline d-sm-none">แผนที่</span>
+                    🗺️ <span class="d-none d-sm-inline">แผนที่สาธารณะ</span><span class="d-inline d-sm-none">แผนที่</span>
                 </a>
 
                 <!-- ปุ่มไฮไลต์หน้าที่กำลังเปิดอยู่ (จัดการระบบ) -->
