@@ -61,7 +61,7 @@ $highlight_id = intval($_GET['highlight_id'] ?? 0);
 // ตัวแปรเช็กสิทธิ์สำหรับแสดง UI
 $is_logged_in = isset($_SESSION['user_id']);
 $user_role = $_SESSION['role'] ?? 'user';
-$user_name = $_SESSION['fullname'] ?? $_SESSION['user_name'] ?? 'ผู้ใช้งาน';
+$user_name = $_SESSION['fullname'] ?? $_SESSION['username'] ?? 'เจ้าหน้าที่';
 ?>
 
 <!DOCTYPE html>
@@ -193,7 +193,7 @@ $user_name = $_SESSION['fullname'] ?? $_SESSION['user_name'] ?? 'ผู้ใช
         /* 📱 Mobile Responsive Styles */
         @media (max-width: 767.98px) {
             #publicMap {
-                height: 42vh !important;
+                height: 48vh !important;
             }
             .list-card {
                 max-height: 35vh !important;
@@ -218,59 +218,31 @@ $user_name = $_SESSION['fullname'] ?? $_SESSION['user_name'] ?? 'ผู้ใช
 </head>
 <body>
 
-    <!-- 🟢 UNIFIED SYSTEM NAVBAR -->
-    <nav class="navbar navbar-expand-lg navbar-dark nav-custom mb-3 shadow-sm border-bottom border-success">
-        <div class="container-fluid container-md">
-            <a class="navbar-brand fw-bold text-warning fs-6" href="index.php">
-                🐘 <span class="d-none d-sm-inline">ระบบติดตามการกระจายตัวของช้างป่า</span>
-                <span class="d-inline d-sm-none">ติดตามช้างป่า</span>
-            </a>
-            
-            <div class="d-flex align-items-center gap-1 gap-sm-2">
-                <?php if ($is_logged_in): ?>
+    <!-- 🟢 NAVBAR แสดงผลเฉพาะเจ้าหน้าที่ (ADMIN) เท่านั้น -->
+    <?php if ($user_role === 'admin'): ?>
+        <nav class="navbar navbar-expand-lg navbar-dark nav-custom mb-3 shadow-sm border-bottom border-danger">
+            <div class="container-fluid container-md">
+                <a class="navbar-brand fw-bold text-warning fs-6" href="admin_dashboard.php">
+                    🐘 ระบบจัดการข้อมูลสำหรับเจ้าหน้าที่
+                </a>
+                
+                <div class="d-flex align-items-center gap-2">
                     <span class="text-white small me-1 d-none d-lg-inline">
                         👤 <?= htmlspecialchars($user_name) ?>
-                        <span class="badge bg-<?= $user_role === 'admin' ? 'danger' : 'success' ?> ms-1"><?= strtoupper($user_role) ?></span>
+                        <span class="badge bg-danger ms-1">ADMIN</span>
                     </span>
-                <?php endif; ?>
 
-                <?php $current_page = basename($_SERVER['PHP_SELF']); ?>
-
-                <a href="index.php" class="btn btn-<?= $current_page === 'index.php' ? 'success' : 'outline-light' ?> btn-sm fw-bold">
-                    ➕ <span class="d-none d-sm-inline">ส่งรายงาน</span><span class="d-inline d-sm-none">รายงาน</span>
-                </a>
-
-                <a href="report.php" class="btn btn-<?= $current_page === 'report.php' ? 'warning' : 'outline-warning' ?> btn-sm fw-bold">
-                    📜 <span class="d-none d-sm-inline">ประวัติรายงาน</span><span class="d-inline d-sm-none">ประวัติ</span>
-                </a>
-
-                <a href="dashboard.php" class="btn btn-<?= $current_page === 'dashboard.php' ? 'info text-white' : 'outline-info' ?> btn-sm fw-bold">
-                    📊 <span class="d-none d-sm-inline">Dashboard</span><span class="d-inline d-sm-none">สถิติ</span>
-                </a>
-
-                <a href="public_map.php" class="btn btn-<?= $current_page === 'public_map.php' ? 'info text-white' : 'outline-info' ?> btn-sm fw-bold">
-                    🗺️ <span class="d-none d-sm-inline">แผนที่</span><span class="d-inline d-sm-none">แผนที่</span>
-                </a>
-
-                <?php if ($user_role === 'admin'): ?>
-                    <a href="admin_dashboard.php" class="btn btn-<?= $current_page === 'admin_dashboard.php' ? 'danger' : 'outline-danger' ?> btn-sm fw-bold shadow-sm">
-                        ⚙️ <span class="d-none d-sm-inline">จัดการระบบ</span><span class="d-inline d-sm-none">Admin</span>
+                    <a href="admin_dashboard.php" class="btn btn-danger btn-sm fw-bold shadow-sm">
+                        📋 จัดการระบบ / อนุมัติข้อมูล
                     </a>
-                <?php endif; ?>
 
-                <?php if ($is_logged_in): ?>
-                    <a href="logout.php" class="btn btn-outline-danger btn-sm ms-1" title="ออกจากระบบ">🔴 <span class="d-none d-md-inline">ออก</span></a>
-                <?php else: ?>
-                    <a href="login.php" class="btn btn-success btn-sm ms-1 fw-bold">🔑 เข้าสู่ระบบ</a>
-                <?php endif; ?>
-
-                <!-- ปุ่มปิดหน้าต่าง LIFF -->
-                <button id="liffCloseBtn" onclick="liff.closeWindow()" class="btn btn-outline-light btn-sm fw-bold ms-1">
-                    <i class="fa-solid fa-xmark me-1"></i> ปิด
-                </button>
+                    <a href="logout.php" class="btn btn-outline-danger btn-sm fw-bold" title="ออกจากระบบ">
+                        🔴 <span class="d-none d-md-inline">ออกจากระบบ</span>
+                    </a>
+                </div>
             </div>
-        </div>
-    </nav>
+        </nav>
+    <?php endif; ?>
 
     <div class="container-fluid container-md my-2 my-md-3">
         
@@ -282,14 +254,26 @@ $user_name = $_SESSION['fullname'] ?? $_SESSION['user_name'] ?? 'ผู้ใช
                 </h5>
             </div>
             
-            <!-- ตัวกรองช่วงเวลา -->
-            <div class="col-7 col-md-6 text-end">
+            <!-- ตัวกรองช่วงเวลา + ปุ่มเข้าสู่ระบบเจ้าหน้าที่ -->
+            <div class="col-7 col-md-6 text-end d-flex align-items-center justify-content-end gap-1">
                 <div class="btn-group btn-group-sm" role="group">
                     <a href="<?php echo $_SERVER['PHP_SELF']; ?>?filter=all" class="btn btn-outline-light <?php echo $filter === 'all' ? 'active fw-bold' : ''; ?>">ทั้งหมด</a>
                     <a href="<?php echo $_SERVER['PHP_SELF']; ?>?filter=today" class="btn btn-outline-light <?php echo $filter === 'today' ? 'active fw-bold' : ''; ?>">วันนี้</a>
                     <a href="<?php echo $_SERVER['PHP_SELF']; ?>?filter=7days" class="btn btn-outline-light <?php echo $filter === '7days' ? 'active fw-bold' : ''; ?>">7 วัน</a>
                     <a href="<?php echo $_SERVER['PHP_SELF']; ?>?filter=30days" class="btn btn-outline-light <?php echo $filter === '30days' ? 'active fw-bold' : ''; ?>">30 วัน</a>
                 </div>
+
+                <!-- ปุ่มเข้าสู่ระบบเจ้าหน้าที่ (แสดงเมื่อยังไม่ได้เป็น admin) -->
+                <?php if ($user_role !== 'admin'): ?>
+                    <a href="login.php" class="btn btn-outline-warning btn-sm fw-bold ms-1" title="สำหรับเจ้าหน้าที่เท่านั้น">
+                        🔑 <span class="d-none d-sm-inline">เข้าสู่ระบบ</span>
+                    </a>
+                <?php endif; ?>
+
+                <!-- ปุ่มปิดหน้าต่าง LIFF -->
+                <button id="liffCloseBtn" onclick="liff.closeWindow()" class="btn btn-outline-danger btn-sm fw-bold ms-1">
+                    <i class="fa-solid fa-xmark"></i> <span class="d-none d-sm-inline">ปิด</span>
+                </button>
             </div>
         </div>
 
