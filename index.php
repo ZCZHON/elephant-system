@@ -144,17 +144,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 </head>
 <body>
 
-    <!-- 🟢 NAVBAR (แยกปุ่มประวัติรีพอร์ต, แดชบอร์ด และแผนที่) -->
+    <!-- 🟢 NAVBAR (ตัดปุ่ม public_map.php ออก เพื่อลดความสับสน) -->
     <nav class="navbar navbar-expand-lg navbar-dark nav-custom mb-3 shadow-sm border-bottom border-success">
         <div class="container-fluid container-md">
             <a class="navbar-brand fw-bold text-warning fs-6" href="index.php">🐘 แจ้งพบช้างป่า</a>
             <div class="d-flex align-items-center gap-1 gap-sm-2">
                 <span class="text-white small me-1 d-none d-md-inline" id="line_user_display">👤 <?= htmlspecialchars($_SESSION['fullname'] ?? 'ผู้ใช้งาน LINE') ?></span>
                 
-                <!-- ปุ่มแยกรายเมนู -->
+                <!-- ปุ่มแยกรายเมนู (เหลือเฉพาะ ประวัติรีพอร์ต และ แดชบอร์ด) -->
                 <a href="report.php" class="btn btn-outline-warning btn-sm fw-bold">📜 ประวัติรีพอร์ต</a>
                 <a href="dashboard.php" class="btn btn-outline-light btn-sm fw-bold">📊 แดชบอร์ด</a>
-                <a href="public_map.php" class="btn btn-outline-info btn-sm fw-bold">🗺️ แผนที่</a>
             </div>
         </div>
     </nav>
