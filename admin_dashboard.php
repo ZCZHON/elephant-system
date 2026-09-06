@@ -202,12 +202,7 @@ foreach ($reports as $r) {
                 <a href="public_map.php" class="btn btn-outline-info btn-sm fw-bold">
                     🗺️ <span class="d-none d-sm-inline">แผนที่สาธารณะ</span><span class="d-inline d-sm-none">แผนที่</span>
                 </a>
-
-                <!-- ปุ่มไฮไลต์หน้าที่กำลังเปิดอยู่ (จัดการระบบ) -->
-                <a href="admin_dashboard.php" class="btn btn-danger btn-sm fw-bold shadow-sm">
-                    ⚙️ <span class="d-none d-sm-inline">จัดการระบบ</span><span class="d-inline d-sm-none">Admin</span>
-                </a>
-
+                
                 <!-- ปุ่มออกจากระบบ -->
                 <a href="logout.php" class="btn btn-outline-danger btn-sm ms-1" title="ออกจากระบบ">
                     🔴 <span class="d-none d-md-inline">ออกจากระบบ</span><span class="d-inline d-md-none">ออก</span>
