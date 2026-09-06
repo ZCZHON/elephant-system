@@ -22,6 +22,23 @@ if (!isset($_SESSION['user_id']) || ($_SESSION['role'] ?? '') !== 'admin') {
     exit();
 }
 
+// 👤 ดึงข้อมูล Admin ที่กำลังใช้งานอยู่ปัจจุบัน
+$admin_fullname = $_SESSION['fullname'] ?? '';
+if (empty($admin_fullname) && isset($_SESSION['user_id'])) {
+    $admin_q = "SELECT first_name, last_name, username FROM tbl_users WHERE user_id = $1";
+    $admin_res = pg_query_params($db, $admin_q, array($_SESSION['user_id']));
+    if ($admin_res && $admin_data = pg_fetch_assoc($admin_res)) {
+        $admin_fullname = trim(($admin_data['first_name'] ?? '') . ' ' . ($admin_data['last_name'] ?? ''));
+        if (empty($admin_fullname)) {
+            $admin_fullname = $admin_data['username'] ?? 'เจ้าหน้าที่';
+        }
+        $_SESSION['fullname'] = $admin_fullname;
+    }
+}
+if (empty($admin_fullname)) {
+    $admin_fullname = 'เจ้าหน้าที่ Admin';
+}
+
 $alert_script = "";
 
 // ➕ ระบบประมวลผลเพิ่ม Admin ใหม่
@@ -102,8 +119,9 @@ foreach ($reports as $r) {
             background-color: #f4f6f9;
             color: #333;
         }
-        .navbar-admin {
-            background-color: #1b4332;
+        .nav-custom {
+            background-color: #0b150a;
+            backdrop-filter: blur(8px);
         }
         .card-stat {
             border: none;
@@ -152,27 +170,47 @@ foreach ($reports as $r) {
 </head>
 <body>
 
-    <!-- Header Navbar -->
-    <nav class="navbar navbar-expand-lg navbar-dark navbar-admin shadow-sm">
+    <!-- 🟢 ADMIN NAVBAR (สอดคล้องกับหน้าอื่น + Badge แสดงสิทธิ์ Admin) -->
+    <nav class="navbar navbar-expand-lg navbar-dark nav-custom mb-3 shadow-sm border-bottom border-danger">
         <div class="container-fluid container-md">
-            <a class="navbar-brand fw-bold" href="admin_dashboard.php">
-                🐘 Admin Management
+            <!-- โลโก้/ชื่อระบบสำหรับ Admin -->
+            <a class="navbar-brand fw-bold text-warning fs-6" href="admin_dashboard.php">
+                🐘 <span class="d-none d-sm-inline">ระบบติดตามการกระจายตัวของช้างป่า</span>
+                <span class="d-inline d-sm-none">จัดการระบบช้างป่า</span>
             </a>
             
-            <div class="d-flex align-items-center gap-2">
-                <span class="text-white me-2 d-none d-md-inline small">
-                    <i class="fa-solid fa-user-shield me-1 text-warning"></i>
-                    <?php echo htmlspecialchars($_SESSION['fullname'] ?? 'เจ้าหน้าที่'); ?>
+            <div class="d-flex align-items-center gap-1 gap-sm-2">
+                <!-- แสดงชื่อผู้ใช้งาน + สถานะ Admin -->
+                <span class="text-white small me-1 d-none d-lg-inline">
+                    👤 <?= htmlspecialchars($admin_fullname) ?>
+                    <span class="badge bg-danger ms-1">ADMIN</span>
                 </span>
-                
-                <a href="public_map.php" class="btn btn-outline-light btn-sm fw-bold">
-                    <i class="fa-solid fa-map-location-dot me-1"></i>
-                    <span class="d-none d-sm-inline">แผนที่</span> (Public Map)
+
+                <!-- เมนูนำทาง -->
+                <a href="index.php" class="btn btn-outline-light btn-sm fw-bold">
+                    ➕ <span class="d-none d-sm-inline">ส่งรายงาน</span><span class="d-inline d-sm-none">รายงาน</span>
                 </a>
-                
-                <a href="logout.php" class="btn btn-danger btn-sm fw-bold">
-                    <i class="fa-solid fa-right-from-bracket"></i>
-                    <span class="d-none d-sm-inline ms-1">ออกจากระบบ</span>
+
+                <a href="report.php" class="btn btn-outline-warning btn-sm fw-bold">
+                    📜 <span class="d-none d-sm-inline">ประวัติรายงาน</span><span class="d-inline d-sm-none">ประวัติ</span>
+                </a>
+
+                <a href="dashboard.php" class="btn btn-outline-info btn-sm fw-bold">
+                    📊 <span class="d-none d-sm-inline">Dashboard</span><span class="d-inline d-sm-none">สถิติ</span>
+                </a>
+
+                <a href="public_map.php" class="btn btn-outline-info btn-sm fw-bold">
+                    🗺️ <span class="d-none d-sm-inline">แผนที่</span><span class="d-inline d-sm-none">แผนที่</span>
+                </a>
+
+                <!-- ปุ่มไฮไลต์หน้าที่กำลังเปิดอยู่ (จัดการระบบ) -->
+                <a href="admin_dashboard.php" class="btn btn-danger btn-sm fw-bold shadow-sm">
+                    ⚙️ <span class="d-none d-sm-inline">จัดการระบบ</span><span class="d-inline d-sm-none">Admin</span>
+                </a>
+
+                <!-- ปุ่มออกจากระบบ -->
+                <a href="logout.php" class="btn btn-outline-danger btn-sm ms-1" title="ออกจากระบบ">
+                    🔴 <span class="d-none d-md-inline">ออกจากระบบ</span><span class="d-inline d-md-none">ออก</span>
                 </a>
             </div>
         </div>
@@ -418,7 +456,7 @@ foreach ($reports as $r) {
             imageModal.show();
         }
 
-        // ⚡ อัปเดตสถานะ อนุมัติ / ปฏิเสธ (ใช้ SweetAlert2)
+        // ⚡ อัปเดตสถานะ อนุมัติ / ปปฏิเสธ (ใช้ SweetAlert2)
         function updateStatus(reportId, newStatus) {
             var actionText = newStatus === 'verified' ? 'อนุมัติ' : 'ปฏิเสธ';
             var confirmBtnColor = newStatus === 'verified' ? '#198754' : '#dc3545';
