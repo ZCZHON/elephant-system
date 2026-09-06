@@ -1,113 +1,82 @@
 <?php
-// กำหนด Timezone ระดับ PHP
+// กำหนด Timezone
 date_default_timezone_set('Asia/Bangkok');
 
 include('db.php');
 
-// 🟢 ตั้งค่า Cookie ให้ตรงกับ login.php (รองรับ HTTPS และข้าม Frame/Domain)
+// 🟢 ตั้งค่า Session Cookie ให้รองรับ LINE LIFF & HTTPS
 session_set_cookie_params([
     'lifetime' => 86400,
     'path' => '/',
     'domain' => '',
-    'secure' => true,      // บังคับใช้ HTTPS
-    'httponly' => true,    // ป้องกัน JavaScript เข้าถึง Cookie
-    'samesite' => 'None'   // อนุญาตให้ส่ง Cookie ข้าม Domain/LIFF ได้
+    'secure' => true,
+    'httponly' => true,
+    'samesite' => 'None'
 ]);
 
 session_start();
 
-// 🔒 1. ตรวจสอบการเข้าสู่ระบบ (หากไม่มี Session และไม่ใช่ POST Request ให้เด้งไป login.php)
-if (!isset($_SESSION['user_id']) && $_SERVER['REQUEST_METHOD'] !== 'POST') {
-    header("Location: login.php");
-    exit;
-}
-
-// 🐘 2. ประมวลผลเมื่อมีการส่งฟอร์มรายงาน (POST Request)
+// 🔴 ส่วนประมวลผลเมื่อกดบันทึกรายงาน (Form Submit)
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    // กำหนดให้ Output คืนค่ากลับเป็น JSON เสมอ
     header('Content-Type: application/json; charset=utf-8');
 
-    $line_user_id   = trim($_POST['line_userid'] ?? '');
-    $user_name      = trim($_POST['user_name'] ?? 'ผู้ใช้งาน LINE');
-    $latitude       = trim($_POST['latitude'] ?? '');
-    $longitude      = trim($_POST['longitude'] ?? '');
-    $elephant_count = (int)($_POST['elephant_count'] ?? 1);
+    $user_id        = $_SESSION['user_id'] ?? null;
+    $line_userid    = trim($_POST['line_userid'] ?? '');
+    $latitude       = floatval($_POST['latitude'] ?? 0);
+    $longitude      = floatval($_POST['longitude'] ?? 0);
+    $elephant_count = intval($_POST['elephant_count'] ?? 1);
     $behavior_type  = trim($_POST['behavior_type'] ?? '');
     $details        = trim($_POST['details'] ?? '');
 
-    $error_msg = null;
-    $success_msg = false;
-
-    // Validation
-    $has_photo = isset($_FILES['photo']) && $_FILES['photo']['error'] === UPLOAD_ERR_OK && $_FILES['photo']['size'] > 0;
-
-    if (empty($line_user_id)) {
-        $error_msg = "ไม่พบข้อมูลบัญชี LINE กรุณาลองใหม่อีกครั้ง";
-    } elseif (empty($latitude) || empty($longitude)) {
-        $error_msg = "กรุณาเลือกตำแหน่งพิกัดบนแผนที่ก่อนส่งรายงาน";
-    } elseif (!$has_photo) {
-        $error_msg = "กรุณาแนบรูปภาพประกอบการรายงาน";
-    } else {
-        // ค้นหา หรือ สร้าง User ในฐานข้อมูล tbl_users อัตโนมัติจาก line_user_id
-        $check_user = pg_query_params($db, "SELECT user_id, role FROM tbl_users WHERE line_user_id = $1", array($line_user_id));
-        
-        if ($check_user && pg_num_rows($check_user) > 0) {
-            $user_row = pg_fetch_assoc($check_user);
-            $user_id = $user_row['user_id'];
-        } else {
-            // สมาชิกใหม่ -> บันทึกลง tbl_users
-            $insert_user = pg_query_params($db, 
-                "INSERT INTO tbl_users (line_user_id, first_name, last_name, registered_at, role) VALUES ($1, $2, '', NOW(), 'user') RETURNING user_id", 
-                array($line_user_id, $user_name)
-            );
-            
-            if ($insert_user) {
-                $user_row = pg_fetch_assoc($insert_user);
-                $user_id = $user_row['user_id'];
-            } else {
-                $error_msg = "เกิดข้อผิดพลาดในการสร้างบัญชีผู้ใช้ใหม่";
-            }
-        }
-
-        // หากสามารถระบุหรือสร้าง user_id ได้สำเร็จ
-        if (!empty($user_id) && empty($error_msg)) {
-            // จัดการอัปโหลดไฟล์รูปภาพ
-            $ext        = pathinfo($_FILES['photo']['name'], PATHINFO_EXTENSION);
-            $new_name   = 'report_' . time() . '_' . rand(1000, 9999) . '.' . strtolower($ext);
-            $target_dir = 'uploads/';
-            
-            if (!is_dir($target_dir)) {
-                mkdir($target_dir, 0755, true);
-            }
-            
-            $target_file = $target_dir . $new_name;
-            if (move_uploaded_file($_FILES['photo']['tmp_name'], $target_file)) {
-                $photo_path = $target_file;
-
-                // บันทึกลง tbl_reports พร้อมคำนวณ PostGIS Geom
-                $query = "INSERT INTO tbl_reports (user_id, latitude, longitude, elephant_count, behavior_type, details, photo_path, status, reported_at, geom) 
-                          VALUES ($1, $2::double precision, $3::double precision, $4, $5, $6, $7, 'pending', NOW() AT TIME ZONE 'Asia/Bangkok', ST_SetSRID(ST_MakePoint($3::double precision, $2::double precision), 4326))";
-                
-                $result = pg_query_params($db, $query, array(
-                    $user_id, $latitude, $longitude, $elephant_count, $behavior_type, $details, $photo_path
-                ));
-
-                if ($result) {
-                    $success_msg = true;
-                } else {
-                    $error_msg = "เกิดข้อผิดพลาดในการบันทึกข้อมูลรายงานลงฐานข้อมูล";
-                }
-            } else {
-                $error_msg = "เกิดข้อผิดพลาดในการอัปโหลดไฟล์รูปภาพ";
-            }
-        }
+    // ตรวจสอบข้อมูลจำเป็น
+    if ($latitude == 0 || $longitude == 0) {
+        echo json_encode(['success' => false, 'message' => 'กรุณาระบุพิกัดตำแหน่งบนแผนที่']);
+        exit;
     }
 
-    // Return JSON สำหรับ AJAX Submission
-    echo json_encode([
-        'status'  => $success_msg ? 'success' : 'error',
-        'message' => $error_msg
-    ]);
+    // 📸 จัดการการอัปโหลดไฟล์รูปภาพ
+    $photo_path = null;
+    if (isset($_FILES['photo']) && $_FILES['photo']['error'] === UPLOAD_ERR_OK) {
+        $upload_dir = 'uploads/';
+        if (!is_dir($upload_dir)) {
+            mkdir($upload_dir, 0777, true);
+        }
+
+        $file_ext = strtolower(pathinfo($_FILES['photo']['name'], PATHINFO_EXTENSION));
+        $allowed_exts = ['jpg', 'jpeg', 'png', 'gif', 'webp'];
+
+        if (in_array($file_ext, $allowed_exts)) {
+            $new_file_name = 'report_' . time() . '_' . rand(1000, 9999) . '.' . $file_ext;
+            $destination = $upload_dir . $new_file_name;
+
+            if (move_uploaded_file($_FILES['photo']['tmp_name'], $destination)) {
+                $photo_path = $destination;
+            } else {
+                echo json_encode(['success' => false, 'message' => 'ไม่สามารถบันทึกไฟล์รูปภาพบนเซิร์ฟเวอร์ได้']);
+                exit;
+            }
+        } else {
+            echo json_encode(['success' => false, 'message' => 'รองรับเฉพาะไฟล์รูปภาพ (JPG, PNG, WEBP) เท่านั้น']);
+            exit;
+        }
+    } else {
+        echo json_encode(['success' => false, 'message' => 'กรุณาแนบรูปภาพถ่ายสถานการณ์ช้างป่า']);
+        exit;
+    }
+
+    // 🐘 บันทึกลงฐานข้อมูล PostgreSQL / PostGIS
+    $query = "INSERT INTO tbl_reports (user_id, line_userid, latitude, longitude, elephant_count, behavior_type, details, photo_path, geom, status, reported_at) 
+              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, ST_SetSRID(ST_MakePoint($4, $3), 4326), 'pending', NOW()) 
+              RETURNING report_id";
+
+    $params = [$user_id, $line_userid, $latitude, $longitude, $elephant_count, $behavior_type, $details, $photo_path];
+    $result = pg_query_params($db, $query, $params);
+
+    if ($result) {
+        echo json_encode(['success' => true, 'message' => 'ส่งรายงานข้อมูลช้างป่าสำเร็จแล้ว เจ้าหน้าที่จะทำการตรวจสอบโดยเร็วที่สุด']);
+    } else {
+        echo json_encode(['success' => false, 'message' => 'เกิดข้อผิดพลาดในการบันทึกข้อมูลลงฐานข้อมูล']);
+    }
     exit;
 }
 ?>
@@ -116,187 +85,137 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 <html lang="th">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ระบบติดตามการกระจายตัวของช้างป่าในประเทศไทย</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>แจ้งพบช้างป่า - Elephant Tracker</title>
+    
     <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;600;700&display=swap" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
-    
-    <!-- 🟢 LINE LIFF SDK -->
     <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
 
     <style>
-        body { font-family: 'Sarabun', sans-serif; background: linear-gradient(rgba(14, 34, 14, 0.75), rgba(14, 34, 14, 0.75)), url('https://images.unsplash.com/photo-1516026672322-bc52d61a55d5?q=80&w=1920') no-repeat center center fixed; background-size: cover; min-height: 100vh; }
-        .main-card { background: rgba(255, 255, 255, 0.96); border-radius: 24px; padding: 25px; box-shadow: 0 15px 35px rgba(0, 0, 0, 0.3); border: 2px solid #2e5a27; max-width: 800px; margin: auto; }
-        #map { height: 300px; width: 100%; border-radius: 12px; border: 1px solid #ced4da; }
-        .nav-custom { background-color: rgba(14, 34, 14, 0.88); backdrop-filter: blur(8px); }
-
-        .leaflet-control-locate {
-            font-size: 16px; font-weight: bold; line-height: 30px; text-align: center;
-            cursor: pointer; display: block; width: 30px; height: 30px; color: #333;
-            text-decoration: none; background-color: #fff; border-bottom: 1px solid #ccc;
-        }
-        .leaflet-control-locate:hover { background-color: #f4f4f4; color: #0d6efd; }
+        body { font-family: 'Sarabun', sans-serif; background-color: #122112; color: #fff; min-height: 100vh; }
+        .main-card { background: rgba(255, 255, 255, 0.96); border-radius: 20px; color: #333; padding: 20px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
+        #map { height: 280px; width: 100%; border-radius: 12px; border: 2px solid #2e5a27; }
     </style>
 </head>
 <body>
 
-    <!-- 🟢 NAVBAR -->
-    <nav class="navbar navbar-expand-lg navbar-dark nav-custom mb-3 shadow-sm border-bottom border-success">
-        <div class="container">
-            <a class="navbar-brand fw-bold text-warning fs-6 fs-md-5" href="#">🐘 ระบบติดตามการกระจายตัวของช้างป่า</a>
-            <div class="d-flex align-items-center gap-2">
-                <span class="text-white small me-1" id="line_user_display">👤 <?= htmlspecialchars($_SESSION['fullname'] ?? 'ผู้ใช้งาน LINE') ?></span>
-                <a href="dashboard.php" class="btn btn-outline-light btn-sm fw-bold">📊 Dashboard</a>
-            </div>
-        </div>
-    </nav>
-
-    <div class="container mb-5">
+    <div class="container py-3">
         <div class="main-card">
-            <div class="text-center mb-3">
-                <h4 class="fw-bold text-success m-0">➕ ฟอร์มรายงานการพบเห็นช้างป่า</h4>
-                <p class="text-muted small m-0">ระบุพิกัดและข้อมูลเหตุการณ์เพื่อแจ้งเตือนชุมชน</p>
-            </div>
+            <h4 class="fw-bold text-success text-center mb-3">🐘 แจ้งพบช้างป่าเชิงพื้นที่</h4>
 
-            <form id="reportForm" enctype="multipart/form-data">
-                <!-- Hidden Inputs สำหรับส่ง LINE UserId -->
+            <!-- 🟢 ฟอร์มรายงาน (มี enctype สำหรับรูปภาพ) -->
+            <form id="reportForm" method="POST" enctype="multipart/form-data">
                 <input type="hidden" name="line_userid" id="line_userid">
-                <input type="hidden" name="user_name" id="user_name">
 
                 <div class="mb-3">
-                    <label class="form-label fw-bold text-success">📍 เลือกตำแหน่งที่พบช้าง (คลิกบนแผนที่) <span class="text-danger">*</span>:</label>
+                    <div class="d-flex justify-content-between align-items-center mb-1">
+                        <label class="form-label fw-bold text-success m-0">📍 ตำแหน่งที่พบช้าง (ระบุบนแผนที่) <span class="text-danger">*</span></label>
+                        <button type="button" class="btn btn-sm btn-outline-primary" onclick="locateUser()">🎯 พิกัดปัจจุบัน</button>
+                    </div>
                     <div id="map"></div>
                 </div>
 
                 <div class="row g-2 mb-3">
                     <div class="col-6">
-                        <label class="form-label fw-bold small">ละติจูด (Latitude) <span class="text-danger">*</span></label>
-                        <input type="text" name="latitude" id="latitude" class="form-control form-control-sm bg-light" readonly required placeholder="คลิกบนแผนที่">
+                        <label class="form-label fw-bold small">ละติจูด (Lat)</label>
+                        <input type="text" name="latitude" id="latitude" class="form-control form-control-sm bg-light" readonly required>
                     </div>
                     <div class="col-6">
-                        <label class="form-label fw-bold small">ลองจิจูด (Longitude) <span class="text-danger">*</span></label>
-                        <input type="text" name="longitude" id="longitude" class="form-control form-control-sm bg-light" readonly required placeholder="คลิกบนแผนที่">
+                        <label class="form-label fw-bold small">ลองจิจูด (Lng)</label>
+                        <input type="text" name="longitude" id="longitude" class="form-control form-control-sm bg-light" readonly required>
                     </div>
                 </div>
 
                 <div class="row g-2 mb-3">
-                    <div class="col-md-6">
-                        <label class="form-label fw-bold small">🐘 จำนวนช้างที่พบ (ตัว)</label>
+                    <div class="col-6">
+                        <label class="form-label fw-bold small">🐘 จำนวน (ตัว)</label>
                         <input type="number" name="elephant_count" class="form-control" min="1" value="1" required>
                     </div>
-                    <div class="col-md-6">
-                        <label class="form-label fw-bold small">⚠️ พฤติกรรมที่พบเห็น</label>
+                    <div class="col-6">
+                        <label class="form-label fw-bold small">⚠️ พฤติกรรม</label>
                         <select name="behavior_type" class="form-select" required>
-                            <option value="">-- เลือกพฤติกรรม --</option>
+                            <option value="">-- เลือก --</option>
                             <option value="เดินผ่าน/สัญจร">เดินผ่าน/สัญจร</option>
-                            <option value="หากินในพืชผลทางการเกษตร">หากินในพืชผลทางการเกษตร</option>
-                            <option value="ดุร้าย/ตกมัน/วิ่งชาร์จ">ดุร้าย/ตกมัน/วิ่งชาร์จ</option>
-                            <option value="บาดเจ็บ/ต้องการความช่วยเหลือ">บาดเจ็บ/ต้องการความช่วยเหลือ</option>
+                            <option value="หากินในพืชผล">หากินในพืชผล</option>
+                            <option value="ดุร้าย/วิ่งชาร์จ">ดุร้าย/วิ่งชาร์จ</option>
+                            <option value="บาดเจ็บ">บาดเจ็บ</option>
                         </select>
                     </div>
                 </div>
 
                 <div class="mb-3">
                     <label class="form-label fw-bold small">📝 รายละเอียดเพิ่มเติม</label>
-                    <textarea name="details" class="form-control" rows="2" placeholder="ระบุจุดสังเกต หรือทิศทางการเดิน..."></textarea>
+                    <textarea name="details" class="form-control" rows="2" placeholder="ระบุทิศทางการเดิน หรือจุดสังเกต..."></textarea>
                 </div>
 
                 <div class="mb-4">
-                    <label class="form-label fw-bold small">📷 ถ่ายภาพ/แนบรูปภาพ <span class="text-danger">* (จำเป็นต้องมี)</span></label>
-                    <input type="file" name="photo" id="photo" class="form-control" accept="image/*" capture="camera" required>
+                    <label class="form-label fw-bold small">📷 ถ่ายภาพ / แนบรูปภาพ <span class="text-danger">*</span></label>
+                    <input type="file" name="photo" id="photo" class="form-control" accept="image/*" capture="environment" required>
                 </div>
 
-                <button type="submit" id="btnSubmit" class="btn btn-success w-100 fw-bold py-2 fs-5 shadow" disabled>กำลังยืนยันตัวตน LINE...</button>
+                <button type="submit" id="btnSubmit" class="btn btn-success w-100 fw-bold py-2 fs-5 shadow">🚀 ส่งรายงานข้อมูล</button>
             </form>
         </div>
     </div>
 
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script>
-        const MY_LIFF_ID = "2011293676-4qqKadRs";
+        // 初始化 Leaflet แผนที่
+        const map = L.map('map').setView([13.7563, 100.5018], 7);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 18 }).addTo(map);
 
-        // 🟢 1. ตรวจสอบการใช้งาน LINE LIFF
-        async function initLiff() {
-            try {
-                await liff.init({ liffId: MY_LIFF_ID });
-                if (liff.isLoggedIn()) {
-                    const profile = await liff.getProfile();
-                    document.getElementById('line_userid').value = profile.userId;
-                    document.getElementById('user_name').value = profile.displayName;
-                    document.getElementById('line_user_display').innerText = '👤 ' + profile.displayName;
-                }
-            } catch (err) {
-                console.error("LIFF Initialization failed", err);
-            } finally {
-                // ปลดล็อกปุ่มส่งข้อมูลเสมอเมื่อโหลดระบบเสร็จ
-                const btn = document.getElementById('btnSubmit');
-                btn.disabled = false;
-                btn.innerText = 'ส่งรายงานข้อมูล';
+        let currentMarker = null;
+
+        function setMarker(lat, lng) {
+            document.getElementById('latitude').value = lat.toFixed(6);
+            document.getElementById('longitude').value = lng.toFixed(6);
+
+            if (currentMarker) {
+                currentMarker.setLatLng([lat, lng]);
+            } else {
+                currentMarker = L.marker([lat, lng], { draggable: true }).addTo(map);
+                currentMarker.on('dragend', function(e) {
+                    const position = currentMarker.getLatLng();
+                    setMarker(position.lat, position.lng);
+                });
             }
         }
 
-        initLiff();
+        map.on('click', function(e) {
+            setMarker(e.latlng.lat, e.latlng.lng);
+        });
 
-        // 🟢 2. แผนที่ Leaflet
-        const map = L.map('map').setView([13.736717, 100.523186], 6);
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 18, attribution: '© OpenStreetMap' }).addTo(map);
-
-        let marker;
-
-        function setMarker(lat, lng) {
-            if (marker) map.removeLayer(marker);
-            marker = L.marker([lat, lng]).addTo(map);
-            document.getElementById('latitude').value = lat.toFixed(6);
-            document.getElementById('longitude').value = lng.toFixed(6);
-        }
-
+        // 🎯 ดึงพิกัด GPS สด ป้องกันการแคชพิกัดเก่า
         function locateUser() {
             if (navigator.geolocation) {
-                Swal.fire({ title: 'กำลังค้นหาตำแหน่งของคุณ...', allowOutsideClick: false, didOpen: () => { Swal.showLoading(); } });
+                Swal.fire({ title: 'กำลังค้นหาพิกัด GPS...', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
                 navigator.geolocation.getCurrentPosition(
-                    (position) => {
+                    (pos) => {
                         Swal.close();
-                        const lat = position.coords.latitude;
-                        const lng = position.coords.longitude;
-                        map.setView([lat, lng], 15, { animate: true });
+                        const lat = pos.coords.latitude;
+                        const lng = pos.coords.longitude;
+                        map.setView([lat, lng], 15);
                         setMarker(lat, lng);
                     },
-                    (error) => { 
+                    (err) => {
                         Swal.close();
-                        Swal.fire('แนะนำเพิ่มเติม', 'คลิกเลือกพิกัดบนแผนที่ด้วยตนเองได้ทันทีครับ', 'info'); 
+                        Swal.fire('คำแนะนำ', 'กรุณาคลิกเลือกตำแหน่งบนแผนที่ด้วยตนเอง', 'info');
                     },
-                    { enableHighAccuracy: true, timeout: 10000 }
+                    { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
                 );
             }
         }
 
-        const zoomControlContainer = map.zoomControl.getContainer();
-        const locateBtn = L.DomUtil.create('a', 'leaflet-control-locate', zoomControlContainer);
-        locateBtn.innerHTML = '➢'; locateBtn.href = '#'; locateBtn.title = 'ไปที่ตำแหน่งปัจจุบัน';
-        L.DomEvent.on(locateBtn, 'click', function(e) { L.DomEvent.stopPropagation(); L.DomEvent.preventDefault(); locateUser(); });
-
-        map.on('click', function(e) { setMarker(e.latlng.lat, e.latlng.lng); });
-        locateUser();
-
-        // 🟢 3. จัดการ Form Submit ด้วย AJAX
+        // 🟢 ส่งข้อมูลแบบ AJAX (Form Submit)
         document.getElementById('reportForm').addEventListener('submit', function(e) {
             e.preventDefault();
-            
-            const lat = document.getElementById('latitude').value;
-            const photoInput = document.getElementById('photo');
 
-            if (!lat) {
-                Swal.fire('ข้อมูลไม่ครบถ้วน', 'กรุณาเลือกตำแหน่งพิกัดบนแผนที่ก่อนส่งรายงาน', 'warning');
-                return;
-            }
-            if (!photoInput.files || photoInput.files.length === 0) {
-                Swal.fire('ข้อมูลไม่ครบถ้วน', 'กรุณาถ่ายภาพประกอบการรายงาน', 'warning');
-                return;
-            }
-
-            Swal.fire({ title: 'กำลังบันทึกข้อมูล...', allowOutsideClick: false, didOpen: () => { Swal.showLoading(); } });
+            const btnSubmit = document.getElementById('btnSubmit');
+            btnSubmit.disabled = true;
+            btnSubmit.innerHTML = '⏳ กำลังส่งข้อมูล...';
 
             const formData = new FormData(this);
 
@@ -306,29 +225,44 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             })
             .then(res => res.json())
             .then(data => {
-                Swal.close();
-                if (data.status === 'success') {
-                    Swal.fire({ 
-                        title: 'ส่งรายงานสำเร็จ!', 
-                        text: 'ขอบคุณสำหรับการแจ้งข้อมูล ระบบได้บันทึกเรียบร้อยแล้ว', 
-                        icon: 'success', 
-                        confirmButtonColor: '#198754' 
+                btnSubmit.disabled = false;
+                btnSubmit.innerHTML = '🚀 ส่งรายงานข้อมูล';
+
+                if (data.success) {
+                    Swal.fire({
+                        icon: 'success',
+                        title: 'สำเร็จ!',
+                        text: data.message,
+                        confirmButtonText: 'ตกลง'
                     }).then(() => {
-                        if (typeof liff !== 'undefined' && liff.isLoggedIn()) {
-                            liff.closeWindow();
-                        } else {
-                            window.location.reload();
-                        }
+                        window.location.href = 'report.php'; // นำไปยังหน้าประวัติรายงาน
                     });
                 } else {
-                    Swal.fire('เกิดข้อผิดพลาด', data.message || 'ไม่สามารถบันทึกข้อมูลได้', 'error');
+                    Swal.fire('เกิดข้อผิดพลาด', data.message, 'error');
                 }
             })
             .catch(err => {
-                Swal.close();
+                btnSubmit.disabled = false;
+                btnSubmit.innerHTML = '🚀 ส่งรายงานข้อมูล';
                 Swal.fire('เกิดข้อผิดพลาด', 'ไม่สามารถเชื่อมต่อเซิร์ฟเวอร์ได้', 'error');
             });
         });
+
+        // 🔑 เริ่มต้นเปิดใช้ LINE LIFF Auto-login
+        async function main() {
+            try {
+                await liff.init({ liffId: "2011293676-4qqKadRs" });
+                if (liff.isLoggedIn()) {
+                    const profile = await liff.getProfile();
+                    document.getElementById('line_userid').value = profile.userId;
+                } else {
+                    liff.login();
+                }
+            } catch (err) {
+                console.log("LIFF Init Error:", err);
+            }
+        }
+        main();
     </script>
 </body>
 </html>
