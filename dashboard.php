@@ -1,11 +1,22 @@
 <?php
-include('db.php');
-session_start();
-
 // ตั้งค่า Timezone ให้ตรงกับประเทศไทย
 date_default_timezone_set('Asia/Bangkok');
 
-// ตรวจสอบความปลอดภัย ต้อง Login ก่อนเข้าหน้า Dashboard
+include('db.php');
+
+// 🟢 ตั้งค่า Cookie ให้ตรงกับ login.php (รองรับ HTTPS และข้าม Frame/Domain)
+session_set_cookie_params([
+    'lifetime' => 86400,
+    'path' => '/',
+    'domain' => '',
+    'secure' => true,      // บังคับใช้ HTTPS
+    'httponly' => true,    // ป้องกัน JavaScript เข้าถึง Cookie
+    'samesite' => 'None'   // อนุญาตให้ส่ง Cookie ข้าม Domain/LIFF ได้
+]);
+
+session_start();
+
+// 🔒 ตรวจสอบความปลอดภัย: ถ้าไม่ได้ Login ให้เด้งไปหน้า login.php
 if (!isset($_SESSION['user_id'])) {
     header("Location: login.php");
     exit;
@@ -169,12 +180,14 @@ if ($result) {
 
     <nav class="navbar navbar-expand-lg navbar-dark nav-custom mb-3 mb-md-4 shadow-sm border-bottom border-success">
         <div class="container">
-            <a class="navbar-brand fw-bold text-warning" href="index.php">🐘 ระบบติดตามการกระจายตัวของช้างป่าในประเทศไทย</a>
+            <a class="navbar-brand fw-bold text-warning" href="index.php">🐘 ระบบติดตามการกระจายตัวของช้างป่า</a>
             
             <div class="d-flex align-items-center gap-1 gap-md-2">
                 <span class="text-white small d-none d-md-inline me-2">👤 <?= htmlspecialchars($user_name, ENT_QUOTES, 'UTF-8') ?></span>
                 <a href="index.php" class="btn btn-warning btn-sm fw-bold px-2 py-1">➕ เพิ่มรายงาน</a>
-                <a href="report.php" class="btn btn-outline-warning btn-sm fw-bold">📜 ประวัติรายงาน</a>
+                <?php if (($_SESSION['role'] ?? '') === 'admin'): ?>
+                    <a href="admin_dashboard.php" class="btn btn-outline-light btn-sm fw-bold">⚙️ จัดการระบบ</a>
+                <?php endif; ?>
                 <a href="logout.php" class="btn btn-outline-danger btn-sm px-2 py-1">🔴 ออกจากระบบ</a>
             </div>
         </div>
@@ -268,10 +281,10 @@ if ($result) {
                                         $status_text = 'รอตรวจสอบ';
                                         $status_badge = 'bg-warning text-dark';
 
-                                        if ($status_raw === 'approved' || $status_raw === 'ตรวจสอบแล้ว' || $status_raw === 'ยืนยันแล้ว') {
+                                        if ($status_raw === 'verified' || $status_raw === 'approved' || $status_raw === 'ตรวจสอบแล้ว') {
                                             $status_text = 'ตรวจสอบแล้ว';
                                             $status_badge = 'bg-success';
-                                        } elseif ($status_raw === 'rejected' || $status_raw === 'เท็จ' || $status_raw === 'ไม่อนุมัติ') {
+                                        } elseif ($status_raw === 'rejected' || $status_raw === 'ไม่อนุมัติ') {
                                             $status_text = 'ไม่อนุมัติ';
                                             $status_badge = 'bg-danger';
                                         }
@@ -379,7 +392,6 @@ if ($result) {
             });
         }
 
-        // เวลาปัจจุบันของฝั่ง Client/Browser
         const nowMs = Date.now();
 
         reportsData.forEach(item => {
@@ -387,7 +399,7 @@ if ($result) {
             const lng = parseFloat(item.longitude);
 
             if (!isNaN(lat) && !isNaN(lng)) {
-                let statusColor = '#6c757d'; // 🔘 สีเทา Default (> 4 ชม.)
+                let statusColor = '#6c757d'; // สีเทา (> 4 ชม.)
                 let statusTitle = '🔘 ประวัติการพบเห็น (> 4 ชั่วโมง)';
                 let isRedAlert = false;
 
@@ -395,11 +407,11 @@ if ($result) {
                     const diffInHours = (nowMs - parseFloat(item.timestamp_ms)) / (1000 * 60 * 60);
 
                     if (diffInHours >= -0.1 && diffInHours <= 1) {
-                        statusColor = '#dc3545'; // 🔴 สีแดง (0 - 1 ชม.)
+                        statusColor = '#dc3545'; // สีแดง (0 - 1 ชม.)
                         statusTitle = '🚨 วิกฤต: พบใน 0-1 ชม. (เฝ้าระวังสูงสุด)';
                         isRedAlert = true;
                     } else if (diffInHours > 1 && diffInHours <= 4) {
-                        statusColor = '#fd7e14'; // 🟠 สีส้ม (1 - 4 ชม.)
+                        statusColor = '#fd7e14'; // สีส้ม (1 - 4 ชม.)
                         statusTitle = '⚠️ เฝ้าระวัง: พบใน 1-4 ชม. (อาจเคลื่อนตัว)';
                     }
                 }
