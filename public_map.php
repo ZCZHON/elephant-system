@@ -18,7 +18,7 @@ session_start();
 
 $highlight_id = isset($_GET['highlight_id']) ? (int)$_GET['highlight_id'] : 0;
 
-// ดึงเฉพาะรายงานที่ได้รับการยืนยัน (status = 'verified' หรือ 'approved')
+// 🟢 ดึงเฉพาะรายงานที่ได้รับการยืนยัน (status = 'verified' หรือ 'approved')
 $query = "SELECT report_id, photo_path, latitude, longitude, elephant_count, behavior_type, details, reported_at 
           FROM tbl_reports 
           WHERE status IN ('verified', 'approved') 
@@ -45,7 +45,7 @@ if ($result) {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>แผนที่สาธารณะ - ติดตามช้างป่า</title>
+    <title>แผนที่สาธารณะ - ติดตามการกระจายตัวของช้างป่า</title>
     
     <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;600;700&display=swap" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
@@ -115,7 +115,7 @@ if ($result) {
                     <?php if (($_SESSION['role'] ?? '') === 'admin'): ?>
                         <a href="admin_dashboard.php" class="btn btn-warning btn-sm fw-bold">⚙️ หน้า Admin</a>
                     <?php else: ?>
-                        <a href="dashboard.php" class="btn btn-warning btn-sm fw-bold">📊 Dashboard</a>
+                        <a href="index.php" class="btn btn-success btn-sm fw-bold">➕ แจ้งพบช้าง</a>
                     <?php endif; ?>
                     <a href="logout.php" class="btn btn-outline-danger btn-sm fw-bold">ออกจากระบบ</a>
                 <?php else: ?>
@@ -242,7 +242,6 @@ if ($result) {
 
                 const marker = L.marker([lat, lng], { icon: customIcon }).addTo(map).bindPopup(popupContent);
 
-                // ตรวจสอบเพื่อเปิด Popup สำหรับหมุด Highlight
                 if (highlightId > 0 && parseInt(item.report_id) === highlightId) {
                     targetMarker = marker;
                     map.setView([lat, lng], 14, { animate: true });
