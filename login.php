@@ -3,6 +3,17 @@
 date_default_timezone_set('Asia/Bangkok');
 
 include('db.php');
+
+// 🟢 ตั้งค่า Cookie ให้รองรับ HTTPS และการทำงานข้าม Domain/Frame บน LINE LIFF
+session_set_cookie_params([
+    'lifetime' => 86400,
+    'path' => '/',
+    'domain' => '',
+    'secure' => true,      // บังคับใช้ HTTPS
+    'httponly' => true,    // ป้องกันการเข้าถึงคุกกี้ผ่าน JavaScript
+    'samesite' => 'None'   // อนุญาตให้ส่ง Cookie ข้าม Frame/LIFF Browser ได้
+]);
+
 session_start();
 
 // 🐘 ประมวลผลเมื่อมีการส่งค่า LINE Profile จาก LIFF (POST/AJAX Request)
@@ -43,6 +54,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             exit;
         }
     }
+
+    // บังคับบันทึก Session ลงดิสก์ทันทีก่อนส่ง Response กลับ
+    session_write_close();
 
     // ส่งผลลัพธ์กลับไปยัง JavaScript LIFF
     echo json_encode([
@@ -159,7 +173,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             .then(res => res.json())
             .then(data => {
                 if (data.status === 'success') {
-                    window.location.href = data.redirect;
+                    // ใช้ replace เพื่อป้องกันไม่ให้ผู้ใช้กด Back กลับมาหน้า login
+                    window.location.replace(data.redirect);
                 } else {
                     Swal.fire('ข้อผิดพลาด', data.message, 'error');
                 }
