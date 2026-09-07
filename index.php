@@ -1,5 +1,8 @@
 <?php
 // 1. ดึงไฟล์เชื่อมต่อฐานข้อมูลและการจัดการ Session หลัก
+if (session_status() === PHP_SESSION_NONE) {
+    session_start();
+}
 include('db.php');
 
 // 🔒 2. ตรวจสอบการเข้าสู่ระบบ (หากไม่มี Session และไม่ใช่ POST Request ให้เด้งไป login.php)
@@ -67,15 +70,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         // หากระบุ user_id ได้สำเร็จ
         if (!empty($user_id) && empty($error_msg)) {
-            // 📸 จัดการอัปโหลดไฟล์รูปภาพ
+            // 📸 จัดการอัปโหลดไฟล์รูปภาพอย่างปลอดภัย
+            $allowed_exts = ['jpg', 'jpeg', 'png', 'webp'];
             $ext = strtolower(pathinfo($_FILES['photo']['name'], PATHINFO_EXTENSION));
-            if (empty($ext)) { $ext = 'jpg'; }
+            if (empty($ext) || !in_array($ext, $allowed_exts)) { 
+                $ext = 'jpg'; 
+            }
             
-            $new_name   = 'report_' . time() . '_' . rand(1000, 9999) . '.' . $ext;
+            $new_name   = 'report_' . time() . '_' . bin2hex(random_bytes(4)) . '.' . $ext;
             $target_dir = 'uploads/';
             
             if (!is_dir($target_dir)) {
-                @mkdir($target_dir, 0777, true);
+                @mkdir($target_dir, 0755, true);
             }
             
             $target_file = $target_dir . $new_name;
@@ -105,7 +111,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     echo json_encode([
         'status'  => $success_msg ? 'success' : 'error',
         'message' => $error_msg
-    ]);
+    ], JSON_UNESCAPED_UNICODE);
     exit();
 }
 ?>
@@ -151,10 +157,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             <div class="d-flex align-items-center gap-1 gap-sm-2">
                 <span class="text-white small d-none d-md-inline me-1" id="line_user_display">
                     👤 <?= htmlspecialchars($user_name) ?>
-                    <span class="badge bg-<?= $user_role === 'admin' ? 'danger' : 'success' ?> ms-1"><?= strtoupper($user_role) ?></span>
+                    <span class="badge bg-<?= $user_role === 'admin' ? 'danger' : 'success' ?> ms-1"><?= strtoupper(htmlspecialchars($user_role)) ?></span>
                 </span>
-
-                <?php $current_page = basename($_SERVER['PHP_SELF']); ?>
 
                 <a href="index.php" class="btn btn-outline-light btn-sm fw-bold">
                     ➕ <span class="d-none d-sm-inline">ส่งรายงาน</span><span class="d-inline d-sm-none">รายงาน</span>
@@ -253,7 +257,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         document.getElementById('user_name').value = profile.displayName;
                         const displayElement = document.getElementById('line_user_display');
                         if (displayElement) {
-                            displayElement.innerHTML = '👤 ' + profile.displayName + ' <span class="badge bg-<?= $user_role === "admin" ? "danger" : "success" ?> ms-1"><?= strtoupper($user_role) ?></span>';
+                            displayElement.innerHTML = '👤 ' + profile.displayName + ' <span class="badge bg-<?= $user_role === "admin" ? "danger" : "success" ?> ms-1"><?= strtoupper(htmlspecialchars($user_role)) ?></span>';
                         }
                     }
                 }
