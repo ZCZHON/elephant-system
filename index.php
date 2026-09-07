@@ -1,43 +1,29 @@
 <?php
-// กำหนด Timezone ระดับ PHP
-date_default_timezone_set('Asia/Bangkok');
-
+// 1. ดึงไฟล์เชื่อมต่อฐานข้อมูลและการจัดการ Session หลัก
 include('db.php');
 
-// 🟢 ตั้งค่า Cookie ให้ตรงกับ login.php (รองรับ HTTPS และข้าม Frame/Domain)
-session_set_cookie_params([
-    'lifetime' => 86400,
-    'path' => '/',
-    'domain' => '',
-    'secure' => true,      // บังคับใช้ HTTPS
-    'httponly' => true,    // ป้องกัน JavaScript เข้าถึง Cookie
-    'samesite' => 'None'   // อนุญาตให้ส่ง Cookie ข้าม Domain/LIFF ได้
-]);
-
-session_start();
-
-// 🔒 1. ตรวจสอบการเข้าสู่ระบบ (หากไม่มี Session และไม่ใช่ POST Request ให้เด้งไป login.php)
+// 🔒 2. ตรวจสอบการเข้าสู่ระบบ (หากไม่มี Session และไม่ใช่ POST Request ให้เด้งไป login.php)
 if (!isset($_SESSION['user_id']) && $_SERVER['REQUEST_METHOD'] !== 'POST') {
     header("Location: login.php");
-    exit;
+    exit();
 }
 
 // ตัวแปรข้อมูลผู้ใช้สำหรับแสดงบน Navbar
 $user_name = $_SESSION['fullname'] ?? $_SESSION['user_name'] ?? 'ผู้ใช้งาน LINE';
 $user_role = $_SESSION['role'] ?? 'user';
 
-// 🐘 2. ประมวลผลเมื่อมีการส่งฟอร์มรายงาน (POST Request)
+// 🐘 3. ประมวลผลเมื่อมีการส่งฟอร์มรายงาน (POST Request)
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     // กำหนดให้ Output คืนค่ากลับเป็น JSON เสมอ
     header('Content-Type: application/json; charset=utf-8');
 
-    $line_user_id   = trim($_POST['line_userid'] ?? '');
+    $line_user_id    = trim($_POST['line_userid'] ?? '');
     $user_name_input = trim($_POST['user_name'] ?? 'ผู้ใช้งาน LINE');
-    $latitude       = trim($_POST['latitude'] ?? '');
-    $longitude      = trim($_POST['longitude'] ?? '');
-    $elephant_count = (int)($_POST['elephant_count'] ?? 1);
-    $behavior_type  = trim($_POST['behavior_type'] ?? '');
-    $details        = trim($_POST['details'] ?? '');
+    $latitude        = trim($_POST['latitude'] ?? '');
+    $longitude       = trim($_POST['longitude'] ?? '');
+    $elephant_count  = (int)($_POST['elephant_count'] ?? 1);
+    $behavior_type   = trim($_POST['behavior_type'] ?? '');
+    $details         = trim($_POST['details'] ?? '');
 
     $error_msg = null;
     $success_msg = false;
@@ -45,35 +31,41 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     // Validation
     $has_photo = isset($_FILES['photo']) && $_FILES['photo']['error'] === UPLOAD_ERR_OK && $_FILES['photo']['size'] > 0;
 
-    if (empty($line_user_id)) {
-        $error_msg = "ไม่พบข้อมูลบัญชี LINE กรุณาลองใหม่อีกครั้ง";
-    } elseif (empty($latitude) || empty($longitude)) {
+    if (empty($latitude) || empty($longitude)) {
         $error_msg = "กรุณาเลือกตำแหน่งพิกัดบนแผนที่ก่อนส่งรายงาน";
     } elseif (!$has_photo) {
         $error_msg = "กรุณาแนบรูปภาพประกอบการรายงาน";
     } else {
-        // ค้นหา หรือ สร้าง User ในฐานข้อมูล tbl_users อัตโนมัติจาก line_user_id
-        $check_user = pg_query_params($db, "SELECT user_id, role FROM tbl_users WHERE line_user_id = $1", array($line_user_id));
-        
-        if ($check_user && pg_num_rows($check_user) > 0) {
-            $user_row = pg_fetch_assoc($check_user);
-            $user_id = $user_row['user_id'];
-        } else {
-            // สมาชิกใหม่ -> บันทึกลง tbl_users
-            $insert_user = pg_query_params($db, 
-                "INSERT INTO tbl_users (line_user_id, first_name, last_name, registered_at, role) VALUES ($1, $2, '', NOW(), 'user') RETURNING user_id", 
-                array($line_user_id, $user_name_input)
-            );
+        // ใช้ user_id จาก Session ก่อน หากไม่มีจึงค่อยค้นหา/สร้างใหม่จาก LINE ID
+        $user_id = $_SESSION['user_id'] ?? null;
+
+        if (!$user_id && !empty($line_user_id)) {
+            $check_user = pg_query_params($db, "SELECT user_id FROM tbl_users WHERE line_user_id = $1", array($line_user_id));
             
-            if ($insert_user) {
-                $user_row = pg_fetch_assoc($insert_user);
+            if ($check_user && pg_num_rows($check_user) > 0) {
+                $user_row = pg_fetch_assoc($check_user);
                 $user_id = $user_row['user_id'];
             } else {
-                $error_msg = "เกิดข้อผิดพลาดในการสร้างบัญชีผู้ใช้ใหม่";
+                // สมาชิกใหม่ -> บันทึกลง tbl_users
+                $insert_user = pg_query_params($db, 
+                    "INSERT INTO tbl_users (line_user_id, first_name, registered_at, role) VALUES ($1, $2, NOW(), 'user') RETURNING user_id", 
+                    array($line_user_id, $user_name_input)
+                );
+                
+                if ($insert_user) {
+                    $user_row = pg_fetch_assoc($insert_user);
+                    $user_id = $user_row['user_id'];
+                } else {
+                    $error_msg = "เกิดข้อผิดพลาดในการสร้างบัญชีผู้ใช้ใหม่";
+                }
             }
         }
 
-        // หากสามารถระบุหรือสร้าง user_id ได้สำเร็จ
+        if (empty($user_id) && empty($error_msg)) {
+            $error_msg = "ไม่พบข้อมูลบัญชีผู้ใช้งาน กรุณาล็อกอินใหม่อีกครั้ง";
+        }
+
+        // หากระบุ user_id ได้สำเร็จ
         if (!empty($user_id) && empty($error_msg)) {
             // 📸 จัดการอัปโหลดไฟล์รูปภาพ
             $ext = strtolower(pathinfo($_FILES['photo']['name'], PATHINFO_EXTENSION));
@@ -114,7 +106,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         'status'  => $success_msg ? 'success' : 'error',
         'message' => $error_msg
     ]);
-    exit;
+    exit();
 }
 ?>
 
@@ -164,7 +156,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                 <?php $current_page = basename($_SERVER['PHP_SELF']); ?>
 
-                <a href="index.php" class="btn btn-<?= $current_page === 'index.php' ? 'outline-light' : 'outline-light' ?> btn-sm fw-bold">
+                <a href="index.php" class="btn btn-outline-light btn-sm fw-bold">
                     ➕ <span class="d-none d-sm-inline">ส่งรายงาน</span><span class="d-inline d-sm-none">รายงาน</span>
                 </a>
 
@@ -194,9 +186,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 <p class="text-muted small m-0">ระบุพิกัดและข้อมูลเหตุการณ์เพื่อแจ้งเตือนชุมชน</p>
             </div>
 
-            <!-- 📸 ฟอร์มกำหนด enctype="multipart/form-data" เสมอ -->
             <form id="reportForm" enctype="multipart/form-data">
-                <!-- Hidden Inputs สำหรับส่ง LINE UserId -->
                 <input type="hidden" name="line_userid" id="line_userid">
                 <input type="hidden" name="user_name" id="user_name">
 
@@ -238,13 +228,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     <textarea name="details" class="form-control" rows="2" placeholder="ระบุจุดสังเกต หรือทิศทางการเดิน..."></textarea>
                 </div>
 
-                <!-- 📸 Input รับรูปภาพแบบ capture="environment" สำหรับถ่ายรูปสด -->
                 <div class="mb-4">
                     <label class="form-label fw-bold small">📷 ถ่ายภาพ/แนบรูปภาพ <span class="text-danger">* (จำเป็นต้องมี)</span></label>
                     <input type="file" name="photo" id="photo" class="form-control" accept="image/*" capture="environment" required>
                 </div>
 
-                <button type="submit" id="btnSubmit" class="btn btn-success w-100 fw-bold py-2 fs-5 shadow" disabled>กำลังยืนยันตัวตน LINE...</button>
+                <button type="submit" id="btnSubmit" class="btn btn-success w-100 fw-bold py-2 fs-5 shadow">ส่งรายงานข้อมูล</button>
             </form>
         </div>
     </div>
@@ -256,22 +245,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         // 🟢 1. ตรวจสอบการใช้งาน LINE LIFF
         async function initLiff() {
             try {
-                await liff.init({ liffId: MY_LIFF_ID });
-                if (liff.isLoggedIn()) {
-                    const profile = await liff.getProfile();
-                    document.getElementById('line_userid').value = profile.userId;
-                    document.getElementById('user_name').value = profile.displayName;
-                    const displayElement = document.getElementById('line_user_display');
-                    if (displayElement) {
-                        displayElement.innerHTML = '👤 ' + profile.displayName + ' <span class="badge bg-<?= $user_role === "admin" ? "danger" : "success" ?> ms-1"><?= strtoupper($user_role) ?></span>';
+                if (typeof liff !== 'undefined' && MY_LIFF_ID) {
+                    await liff.init({ liffId: MY_LIFF_ID });
+                    if (liff.isLoggedIn()) {
+                        const profile = await liff.getProfile();
+                        document.getElementById('line_userid').value = profile.userId;
+                        document.getElementById('user_name').value = profile.displayName;
+                        const displayElement = document.getElementById('line_user_display');
+                        if (displayElement) {
+                            displayElement.innerHTML = '👤 ' + profile.displayName + ' <span class="badge bg-<?= $user_role === "admin" ? "danger" : "success" ?> ms-1"><?= strtoupper($user_role) ?></span>';
+                        }
                     }
                 }
             } catch (err) {
-                console.error("LIFF Initialization failed", err);
-            } finally {
-                const btn = document.getElementById('btnSubmit');
-                btn.disabled = false;
-                btn.innerText = 'ส่งรายงานข้อมูล';
+                console.warn("LIFF Initialization skipped or failed", err);
             }
         }
 
@@ -318,9 +305,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         map.on('click', function(e) { setMarker(e.latlng.lat, e.latlng.lng); });
         locateUser();
 
-        // 🟢 3. ฟังก์ชันสำหรับย่อขนาดรูปภาพก่อนอัปโหลด (Canvas Compress)
+        // 🟢 3. ฟังก์ชันสำหรับย่อขนาดรูปภาพก่อนอัปโหลด
         function compressImage(file, maxWidth = 1200, quality = 0.75) {
-            return new Promise((resolve, reject) => {
+            return new Promise((resolve) => {
                 const reader = new FileReader();
                 reader.readAsDataURL(file);
                 reader.onload = (event) => {
@@ -353,13 +340,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             }
                         }, 'image/jpeg', quality);
                     };
-                    img.onerror = (err) => resolve(file);
+                    img.onerror = () => resolve(file);
                 };
-                reader.onerror = (err) => resolve(file);
+                reader.onerror = () => resolve(file);
             });
         }
 
-        // 🟢 4. จัดการ Form Submit ด้วย AJAX + Client-side Compress Image
+        // 🟢 4. จัดการ Form Submit ด้วย AJAX
         document.getElementById('reportForm').addEventListener('submit', async function(e) {
             e.preventDefault();
             
@@ -378,12 +365,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             Swal.fire({ title: 'กำลังประมวลผลรูปภาพ...', allowOutsideClick: false, didOpen: () => { Swal.showLoading(); } });
 
             try {
-                // ย่อขนาดรูปภาพก่อนส่ง
                 const rawFile = photoInput.files[0];
                 const compressedFile = await compressImage(rawFile);
 
                 const formData = new FormData(this);
-                formData.set('photo', compressedFile, compressedFile.name); // แทนที่ไฟล์เดิมด้วยไฟล์ที่ย่อแล้ว
+                formData.set('photo', compressedFile, compressedFile.name);
 
                 Swal.fire({ title: 'กำลังบันทึกข้อมูล...', allowOutsideClick: false, didOpen: () => { Swal.showLoading(); } });
 
