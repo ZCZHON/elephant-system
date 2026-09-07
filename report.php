@@ -1,22 +1,11 @@
 <?php
-// กำหนด Timezone ระดับ PHP
+// 1. กำหนด Timezone
 date_default_timezone_set('Asia/Bangkok');
 
+// 2. เรียก db.php (จัดการ Session และการเชื่อมต่อ DB ทั้งหมดให้จบในจุดเดียว)
 include('db.php');
 
-// 🟢 ตั้งค่า Cookie ให้ตรงกับระบบ (รองรับ HTTPS และข้าม Frame/Domain)
-session_set_cookie_params([
-    'lifetime' => 86400,
-    'path' => '/',
-    'domain' => '',
-    'secure' => true,      // บังคับใช้ HTTPS
-    'httponly' => true,    // ป้องกัน JavaScript เข้าถึง Cookie
-    'samesite' => 'None'   // อนุญาตให้ส่ง Cookie ข้าม Domain/LIFF ได้
-]);
-
-session_start();
-
-// 🔒 ตรวจสอบการเข้าสู่ระบบ (ถ้าไม่มี Session ให้รีไดเรกต์ไปหน้า login.php)
+// 🔒 3. ตรวจสอบการเข้าสู่ระบบ (ถ้าไม่มี Session ให้รีไดเรกต์ไปหน้า login.php)
 if (!isset($_SESSION['user_id'])) {
     header("Location: login.php");
     exit;
@@ -26,7 +15,7 @@ $user_id   = $_SESSION['user_id'];
 $user_name = $_SESSION['fullname'] ?? 'ผู้ใช้งานระบบ';
 $user_role = $_SESSION['role'] ?? 'user';
 
-// 🎯 ดึงข้อมูลรายงานเฉพาะของคนที่ล็อกอินอยู่ ($user_id)
+// 🎯 4. ดึงข้อมูลรายงานเฉพาะของคนที่ล็อกอินอยู่ ($user_id)
 $reports = [];
 if ($user_id) {
     $query = "SELECT report_id, user_id, photo_path, latitude, longitude, elephant_count, behavior_type, details, reported_at, status
