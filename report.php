@@ -109,7 +109,7 @@ if ($user_id) {
 
                 <a href="index.php" class="btn btn-outline-light btn-sm fw-bold">➕ ส่งรายงาน</a>
                 <a href="report.php" class="btn btn-warning btn-sm fw-bold">📜 ประวัติรายงาน</a>
-                <a href="dashboard.php" class="btn btn-outline-light btn-sm fw-bold">📊 Dashboard</a>
+                <a href="dashboard.php" class="btn btn-outline-light btn-sm fw-bold">📊 สถิติ</a>
 
                 <?php if ($user_role === 'admin'): ?>
                     <a href="admin_dashboard.php" class="btn btn-danger btn-sm fw-bold shadow-sm">⚙️ จัดการระบบ</a>
