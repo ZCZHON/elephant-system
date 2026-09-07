@@ -1,22 +1,28 @@
 <?php
-// กำหนด Timezone ระดับ PHP
+// 1. กำหนด Timezone
 date_default_timezone_set('Asia/Bangkok');
 
+// 🟢 2. ตั้งค่า Cookie ให้รองรับ HTTPS และ LINE LIFF (ต้องทำก่อนเปิด Session หรือ include db.php)
+if (session_status() === PHP_SESSION_NONE) {
+    session_set_cookie_params([
+        'lifetime' => 86400,
+        'path'     => '/',
+        'domain'   => '',
+        'secure'   => true,      // บังคับใช้ HTTPS
+        'httponly' => true,      // ป้องกันการเข้าถึงคุกกี้ผ่าน JavaScript
+        'samesite' => 'None'     // อนุญาตให้ส่ง Cookie ข้าม Frame/LIFF Browser ได้
+    ]);
+}
+
+// 3. เชื่อมต่อฐานข้อมูล (ซึ่งในไฟล์ db.php มี session_start อยู่แล้ว)
 include('db.php');
 
-// 🟢 ตั้งค่า Cookie ให้รองรับ HTTPS และการทำงานข้าม Domain/Frame บน LINE LIFF
-session_set_cookie_params([
-    'lifetime' => 86400,
-    'path' => '/',
-    'domain' => '',
-    'secure' => true,      // บังคับใช้ HTTPS
-    'httponly' => true,    // ป้องกันการเข้าถึงคุกกี้ผ่าน JavaScript
-    'samesite' => 'None'   // อนุญาตให้ส่ง Cookie ข้าม Frame/LIFF Browser ได้
-]);
+// ตรวจสอบความแน่ใจอีกครั้ง ถ้า Session ยังไม่เปิดให้เปิด
+if (session_status() === PHP_SESSION_NONE) {
+    session_start();
+}
 
-session_start();
-
-// 🐘 ประมวลผลเมื่อมีการส่งค่า LINE Profile จาก LIFF (POST/AJAX Request)
+// 🐘 4. ประมวลผลเมื่อมีการส่งค่า LINE Profile จาก LIFF (POST/AJAX Request)
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     header('Content-Type: application/json; charset=utf-8');
 
