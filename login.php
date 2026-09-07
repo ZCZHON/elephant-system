@@ -2,28 +2,29 @@
 // 1. กำหนด Timezone
 date_default_timezone_set('Asia/Bangkok');
 
-// 🟢 2. ตั้งค่า Cookie ให้รองรับ HTTPS และ LINE LIFF (ต้องทำก่อนเปิด Session หรือ include db.php)
+// 🟢 2. เช็คว่าเป็นการเชื่อมต่อผ่าน HTTPS หรือไม่ก่อนตั้งค่า Cookie
+$is_https = (isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] === 'on') || 
+             (isset($_SERVER['HTTP_X_FORWARDED_PROTO']) && $_SERVER['HTTP_X_FORWARDED_PROTO'] === 'https');
+
 if (session_status() === PHP_SESSION_NONE) {
     session_set_cookie_params([
         'lifetime' => 86400,
         'path'     => '/',
         'domain'   => '',
-        'secure'   => true,      // บังคับใช้ HTTPS
-        'httponly' => true,      // ป้องกันการเข้าถึงคุกกี้ผ่าน JavaScript
-        'samesite' => 'None'     // อนุญาตให้ส่ง Cookie ข้าม Frame/LIFF Browser ได้
+        'secure'   => $is_https,              // เป็น true เมื่อใช้ HTTPS เท่านั้น (ถ้า run localhost จะเป็น false)
+        'httponly' => true,
+        'samesite' => $is_https ? 'None' : 'Lax' // ถ้าไม่ใช่ HTTPS ให้ใช้ Lax เพื่อป้องกัน Cookie โดนบล็อก
     ]);
-}
-
-// 3. เชื่อมต่อฐานข้อมูล (ซึ่งในไฟล์ db.php มี session_start อยู่แล้ว)
-include('db.php');
-
-// ตรวจสอบความแน่ใจอีกครั้ง ถ้า Session ยังไม่เปิดให้เปิด
-if (session_status() === PHP_SESSION_NONE) {
     session_start();
 }
 
+// 3. เชื่อมต่อฐานข้อมูล
+include('db.php');
+
 // 🐘 4. ประมวลผลเมื่อมีการส่งค่า LINE Profile จาก LIFF (POST/AJAX Request)
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    // ล้าง Output Buffer ก่อนส่ง JSON เพื่อป้องกัน Error จาก Warning/Notice ของ PHP
+    if (ob_get_length()) ob_clean();
     header('Content-Type: application/json; charset=utf-8');
 
     $line_user_id = trim($_POST['line_userid'] ?? '');
@@ -37,12 +38,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     // 1. ตรวจสอบว่ามี User นี้ในฐานข้อมูล tbl_users แล้วหรือยัง
     $check_user = pg_query_params($db, "SELECT user_id, first_name, role FROM tbl_users WHERE line_user_id = $1", array($line_user_id));
 
+    $role = 'user';
+
     if ($check_user && pg_num_rows($check_user) > 0) {
         // มีผู้ใช้งานเดิมในระบบแล้ว -> ดึงข้อมูลเข้า Session
         $user_row = pg_fetch_assoc($check_user);
         $_SESSION['user_id']  = $user_row['user_id'];
         $_SESSION['fullname'] = $user_row['first_name'];
         $_SESSION['role']     = $user_row['role'];
+        $role                 = $user_row['role'];
     } else {
         // สมาชิกใหม่ -> บันทึกลง tbl_users อัตโนมัติ
         $insert_user = pg_query_params($db, 
@@ -55,6 +59,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $_SESSION['user_id']  = $user_row['user_id'];
             $_SESSION['fullname'] = $user_name;
             $_SESSION['role']     = $user_row['role'];
+            $role                 = $user_row['role'];
         } else {
             echo json_encode(['status' => 'error', 'message' => 'ไม่สามารถสร้างบัญชีผู้ใช้ใหม่ได้']);
             exit;
@@ -64,10 +69,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     // บังคับบันทึก Session ลงดิสก์ทันทีก่อนส่ง Response กลับ
     session_write_close();
 
+    // กำหนด URL ปลายทาง
+    $redirect_url = ($role === 'admin') ? 'admin_dashboard.php' : 'index.php';
+
     // ส่งผลลัพธ์กลับไปยัง JavaScript LIFF
     echo json_encode([
         'status'   => 'success',
-        'redirect' => ($_SESSION['role'] === 'admin') ? 'admin_dashboard.php' : 'index.php'
+        'redirect' => $redirect_url
     ]);
     exit;
 }
@@ -179,8 +187,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             .then(res => res.json())
             .then(data => {
                 if (data.status === 'success') {
-                    // ใช้ replace เพื่อป้องกันไม่ให้ผู้ใช้กด Back กลับมาหน้า login
-                    window.location.replace(data.redirect);
+                    // เปลี่ยนหน้าไปยัง index.php หรือ admin_dashboard.php
+                    window.location.href = data.redirect;
                 } else {
                     Swal.fire('ข้อผิดพลาด', data.message, 'error');
                 }
