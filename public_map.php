@@ -2,23 +2,26 @@
 // กำหนด Timezone ระดับ PHP
 date_default_timezone_set('Asia/Bangkok');
 
+// 🟢 1. ตั้งค่า Cookie Session ก่อนเริ่ม Session หรือ include ไฟล์อื่น
+if (session_status() === PHP_SESSION_NONE) {
+    session_set_cookie_params([
+        'lifetime' => 86400,
+        'path'     => '/',
+        'domain'   => '',
+        'secure'   => isset($_SERVER['HTTPS']), // เปิดใช้งาน secure เฉพาะเมื่อเป็น HTTPS
+        'httponly' => true,                    // ป้องกัน JavaScript เข้าถึง Cookie
+        'samesite' => 'Lax'                    // ปรับเป็น Lax เพื่อความปลอดภัยจาก CSRF
+    ]);
+    session_start();
+}
+
+// 🟢 2. เรียกใช้ไฟล์ฐานข้อมูล
 include('db.php');
-
-// 🟢 ตั้งค่า Cookie ให้รองรับ HTTPS และข้าม Frame/LIFF
-session_set_cookie_params([
-    'lifetime' => 86400,
-    'path' => '/',
-    'domain' => '',
-    'secure' => true,
-    'httponly' => true,
-    'samesite' => 'None'
-]);
-
-session_start();
 
 // รับค่า Filter ช่วงเวลา
 $filter = $_GET['filter'] ?? 'all';
 
+$params = [];
 $where_clause = "WHERE r.status IN ('verified', 'approved')";
 
 if ($filter === 'today') {
@@ -29,7 +32,7 @@ if ($filter === 'today') {
     $where_clause .= " AND r.reported_at >= NOW() - INTERVAL '30 days'";
 }
 
-// 1. ดึงข้อมูลรายงานที่ verified หรือ approved แล้ว
+// 📜 1. ดึงข้อมูลรายงานที่ verified หรือ approved แล้ว
 $query = "SELECT r.*, 
                  CONCAT(u.first_name, ' ', u.last_name) AS fullname 
           FROM tbl_reports r 
@@ -38,7 +41,7 @@ $query = "SELECT r.*,
           ORDER BY r.reported_at DESC";
 
 $result = pg_query($db, $query);
-$verified_reports = ($result) ? pg_fetch_all($result) ?: [] : [];
+$verified_reports = ($result) ? (pg_fetch_all($result) ?: []) : [];
 
 // คำนวณสถิติ
 $total_spots = count($verified_reports);
@@ -47,7 +50,7 @@ foreach ($verified_reports as $item) {
     $total_elephants += intval($item['elephant_count'] ?? 1);
 }
 
-// 2. ดึงจำนวนอาสาสมัคร
+// 👥 2. ดึงจำนวนอาสาสมัคร
 $query_users = "SELECT COUNT(*) AS total_volunteers FROM tbl_users"; 
 $res_users = pg_query($db, $query_users);
 $total_volunteers = 0;
@@ -60,8 +63,8 @@ $highlight_id = intval($_GET['highlight_id'] ?? 0);
 
 // ตัวแปรเช็กสิทธิ์สำหรับแสดง UI
 $is_logged_in = isset($_SESSION['user_id']);
-$user_role = $_SESSION['role'] ?? 'user';
-$user_name = $_SESSION['fullname'] ?? $_SESSION['username'] ?? 'เจ้าหน้าที่';
+$user_role    = $_SESSION['role'] ?? 'user';
+$user_name    = $_SESSION['fullname'] ?? $_SESSION['username'] ?? 'เจ้าหน้าที่';
 ?>
 
 <!DOCTYPE html>
@@ -228,7 +231,7 @@ $user_name = $_SESSION['fullname'] ?? $_SESSION['username'] ?? 'เจ้าห�
                 
                 <div class="d-flex align-items-center gap-2">
                     <span class="text-white small me-1 d-none d-lg-inline">
-                        👤 <?= htmlspecialchars($user_name) ?>
+                        👤 <?= htmlspecialchars($user_name, ENT_QUOTES, 'UTF-8') ?>
                         <span class="badge bg-danger ms-1">ADMIN</span>
                     </span>
 
@@ -257,10 +260,10 @@ $user_name = $_SESSION['fullname'] ?? $_SESSION['username'] ?? 'เจ้าห�
             <!-- ตัวกรองช่วงเวลา + ปุ่มเข้าสู่ระบบเจ้าหน้าที่ -->
             <div class="col-7 col-md-6 text-end d-flex align-items-center justify-content-end gap-1">
                 <div class="btn-group btn-group-sm" role="group">
-                    <a href="<?php echo $_SERVER['PHP_SELF']; ?>?filter=all" class="btn btn-outline-light <?php echo $filter === 'all' ? 'active fw-bold' : ''; ?>">ทั้งหมด</a>
-                    <a href="<?php echo $_SERVER['PHP_SELF']; ?>?filter=today" class="btn btn-outline-light <?php echo $filter === 'today' ? 'active fw-bold' : ''; ?>">วันนี้</a>
-                    <a href="<?php echo $_SERVER['PHP_SELF']; ?>?filter=7days" class="btn btn-outline-light <?php echo $filter === '7days' ? 'active fw-bold' : ''; ?>">7 วัน</a>
-                    <a href="<?php echo $_SERVER['PHP_SELF']; ?>?filter=30days" class="btn btn-outline-light <?php echo $filter === '30days' ? 'active fw-bold' : ''; ?>">30 วัน</a>
+                    <a href="<?php echo htmlspecialchars($_SERVER['PHP_SELF'], ENT_QUOTES, 'UTF-8'); ?>?filter=all" class="btn btn-outline-light <?php echo $filter === 'all' ? 'active fw-bold' : ''; ?>">ทั้งหมด</a>
+                    <a href="<?php echo htmlspecialchars($_SERVER['PHP_SELF'], ENT_QUOTES, 'UTF-8'); ?>?filter=today" class="btn btn-outline-light <?php echo $filter === 'today' ? 'active fw-bold' : ''; ?>">วันนี้</a>
+                    <a href="<?php echo htmlspecialchars($_SERVER['PHP_SELF'], ENT_QUOTES, 'UTF-8'); ?>?filter=7days" class="btn btn-outline-light <?php echo $filter === '7days' ? 'active fw-bold' : ''; ?>">7 วัน</a>
+                    <a href="<?php echo htmlspecialchars($_SERVER['PHP_SELF'], ENT_QUOTES, 'UTF-8'); ?>?filter=30days" class="btn btn-outline-light <?php echo $filter === '30days' ? 'active fw-bold' : ''; ?>">30 วัน</a>
                 </div>
 
                 <!-- ปุ่มเข้าสู่ระบบเจ้าหน้าที่ (แสดงเมื่อยังไม่ได้เป็น admin) -->
@@ -323,7 +326,7 @@ $user_name = $_SESSION['fullname'] ?? $_SESSION['username'] ?? 'เจ้าห�
 
                     <?php if (!empty($verified_reports)): ?>
                         <?php foreach ($verified_reports as $item): 
-                            $reported_time = strtotime($item['reported_at'] ?? $item['created_at'] ?? 'now');
+                            $reported_time = strtotime($item['reported_at'] ?? 'now');
                             $diff_hours = (time() - $reported_time) / 3600;
 
                             $border_class = 'border-gray';
@@ -340,7 +343,7 @@ $user_name = $_SESSION['fullname'] ?? $_SESSION['username'] ?? 'เจ้าห�
                                 $status_text = '🟠 เฝ้าระวัง (1-4 ชม.)';
                             }
                         ?>
-                            <div class="report-item <?php echo $border_class; ?>" onclick="focusOnMap(<?php echo $item['latitude']; ?>, <?php echo $item['longitude']; ?>, <?php echo $item['report_id']; ?>)">
+                            <div class="report-item <?php echo $border_class; ?>" onclick="focusOnMap(<?php echo (float)$item['latitude']; ?>, <?php echo (float)$item['longitude']; ?>, <?php echo (int)$item['report_id']; ?>)">
                                 <div class="d-flex justify-content-between align-items-start mb-1">
                                     <span class="badge <?php echo $badge_bg; ?>" style="font-size: 0.7rem;"><?php echo $status_text; ?></span>
                                     <small class="text-white-50" style="font-size: 0.75rem;">
@@ -348,10 +351,10 @@ $user_name = $_SESSION['fullname'] ?? $_SESSION['username'] ?? 'เจ้าห�
                                     </small>
                                 </div>
                                 <div class="fw-bold text-white small mt-1">
-                                    🐘 พบช้าง <?php echo $item['elephant_count']; ?> ตัว | พฤติกรรม: <?php echo htmlspecialchars(($item['behavior_type'] ?? $item['behavior'] ?? '') ?: 'ไม่ระบุ'); ?>
+                                    🐘 พบช้าง <?php echo (int)$item['elephant_count']; ?> ตัว | พฤติกรรม: <?php echo htmlspecialchars(($item['behavior_type'] ?? $item['behavior'] ?? '') ?: 'ไม่ระบุ', ENT_QUOTES, 'UTF-8'); ?>
                                 </div>
                                 <div class="text-white-50 small text-truncate mt-1" style="font-size: 0.8rem;">
-                                    <?php echo htmlspecialchars($item['details'] ?: 'ไม่มีรายละเอียดเพิ่มเติม'); ?>
+                                    <?php echo htmlspecialchars($item['details'] ?: 'ไม่มีรายละเอียดเพิ่มเติม', ENT_QUOTES, 'UTF-8'); ?>
                                 </div>
                             </div>
                         <?php endforeach; ?>
@@ -374,15 +377,17 @@ $user_name = $_SESSION['fullname'] ?? $_SESSION['username'] ?? 'เจ้าห�
 
         // 🟢 ตรวจสอบ LINE LIFF
         document.addEventListener("DOMContentLoaded", function() {
-            liff.init({ liffId: MY_LIFF_ID })
-                .then(() => {
-                    if (liff.isInClient()) {
-                        document.getElementById('liffCloseBtn').style.display = 'inline-block';
-                    }
-                })
-                .catch((err) => {
-                    console.log("LIFF Init Mode: Web Browser", err);
-                });
+            if (typeof liff !== 'undefined') {
+                liff.init({ liffId: MY_LIFF_ID })
+                    .then(() => {
+                        if (liff.isInClient()) {
+                            document.getElementById('liffCloseBtn').style.display = 'inline-block';
+                        }
+                    })
+                    .catch((err) => {
+                        console.log("LIFF Init Mode: Web Browser", err);
+                    });
+            }
         });
 
         // 🗺️ Leaflet Map Setup
@@ -418,7 +423,8 @@ $user_name = $_SESSION['fullname'] ?? $_SESSION['username'] ?? 'เจ้าห�
         var iconOrange = createElephantIcon('#fd7e14'); 
         var iconGray = createElephantIcon('#6c757d');   
 
-        var reports = <?php echo json_encode($verified_reports); ?>;
+        // ป้องกันสคริปต์พังด้วยการใช้ตัวเลือก JSON_HEX
+        var reports = <?php echo json_encode($verified_reports, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP); ?>;
         var highlightId = <?php echo $highlight_id; ?>;
         var markers = {};
         var bounds = [];
@@ -431,7 +437,7 @@ $user_name = $_SESSION['fullname'] ?? $_SESSION['username'] ?? 'เจ้าห�
                 
                 bounds.push([lat, lng]);
 
-                var reportedAt = new Date(item.reported_at || item.created_at).getTime();
+                var reportedAt = new Date(item.reported_at).getTime();
                 var now = new Date().getTime();
                 var diffHours = (now - reportedAt) / (1000 * 60 * 60);
 
