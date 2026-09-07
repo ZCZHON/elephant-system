@@ -1,144 +1,205 @@
 <?php
 // send_geo_alert.php
-include('db.php');
+date_default_timezone_set('Asia/Bangkok');
 
-// 🔑 ตั้งค่า LINE Channel Access Token (Long-lived)
-define('LINE_CHANNEL_ACCESS_TOKEN', 'vUaGw1vzFBZMaymolByLH4fdNI1vhfNJcGJhWpOWFTjBEZcF/bXW2iNvC90tMQYcxBCqsQQJFg7sFMreK7DUqMJAgYmKQa4PycjAFJo8LtEE4/ISnLbQP5stkk4iM1laj4YFdUo4xNGfsMHodK0tygdB04t89/1O/w1cDnyilFU=');
+/**
+ * ฟังก์ชันส่งแจ้งเตือนภัยช้างป่าไปยังผู้ใช้ที่อยู่ในรัศมีระยะทางที่กำหนด
+ *
+ * @param int $report_id ID ของรายงานการพบเห็นช้างป่า
+ * @param resource $db Connection Resource ของ PostgreSQL (pg_connect)
+ * @param float $radius_km รัศมีในการแจ้งเตือน (กิโลเมตร) Default = 5.0
+ * @return int จำนวนผู้ใช้ที่ส่งแจ้งเตือนสำเร็จ
+ */
+function sendElephantAlert($report_id, $db, $radius_km = 5.0) {
+    // 🔑 1. กำหนด LINE Channel Access Token ของคุณ
+    $channel_access_token = 'YOUR_LINE_CHANNEL_ACCESS_TOKEN'; 
+    $base_url = 'https://yourdomain.com/'; // URL หลักของเว็บไซต์สำหรับดูรูปและเปิดแผนที่
 
-function sendElephantAlert($report_id, $db) {
-    // 1. ดึงข้อมูลรายงานเหตุการณ์ช้างป่า
-    $q_report = "SELECT latitude, longitude, elephant_count, behavior_type, details, reported_at 
-                 FROM tbl_reports WHERE report_id = $1";
-    $res_report = pg_query_params($db, $q_report, array($report_id));
-    
-    if (!$res_report || pg_num_rows($res_report) === 0) {
+    if ($report_id <= 0 || !$db) {
         return 0;
     }
-    $report = pg_fetch_assoc($res_report);
-    $lat = (float)$report['latitude'];
-    $lng = (float)$report['longitude'];
 
-    // 2. ค้นหาผู้ใช้ในรัศมี 5 กม. (5000 เมตร) ที่ยังไม่เคยได้รับแจ้งเตือนสำหรับ report_id นี้ (ป้องกันการส่งซ้ำ)
-    $q_users = "SELECT DISTINCT u.user_id, u.line_user_id,
-                       ROUND((ST_DistanceSphere(
-                           ST_MakePoint(r.longitude, r.latitude),
-                           ST_MakePoint($1, $2)
-                       ) / 1000)::numeric, 2) AS distance_km
-                FROM tbl_users u
-                JOIN tbl_reports r ON u.user_id = r.user_id
-                WHERE u.line_user_id IS NOT NULL 
-                  AND u.line_user_id != ''
-                  AND ST_DistanceSphere(
-                        ST_MakePoint(r.longitude, r.latitude),
-                        ST_MakePoint($1, $2)
-                      ) <= 5000
-                  AND u.user_id NOT IN (
-                      SELECT user_id FROM tbl_alert WHERE report_id = $3
-                  )";
+    // 📜 2. ดึงข้อมูลรายงานการพบช้างป่าตาม report_id
+    $report_q = "SELECT r.*, 
+                        CONCAT(u.first_name, ' ', u.last_name) AS reporter_name
+                 FROM tbl_reports r
+                 LEFT JOIN tbl_users u ON r.user_id = u.user_id
+                 WHERE r.report_id = $1";
+    $report_res = pg_query_params($db, $report_q, array($report_id));
 
-    $res_users = pg_query_params($db, $q_users, array($lng, $lat, $report_id));
-    
-    if (!$res_users || pg_num_rows($res_users) === 0) {
-        return 0; // ไม่มีผู้ใช้อยู่ในรัศมี หรือส่งเตือนไปครบทุกคนแล้ว
+    if (!$report_res || pg_num_rows($report_res) === 0) {
+        return 0;
     }
 
-    $target_users = [];
-    while ($row = pg_fetch_assoc($res_users)) {
-        $target_users[] = $row;
+    $report = pg_fetch_assoc($report_res);
+    $rep_lat = floatval($report['latitude']);
+    $rep_lng = floatval($report['longitude']);
+    $elephant_count = intval($report['elephant_count'] ?? 1);
+    $behavior = !empty($report['behavior_type']) ? $report['behavior_type'] : ($report['behavior'] ?? 'ไม่ระบุ');
+    $details = !empty($report['details']) ? $report['details'] : 'โปรดระมัดระวังเมื่อสัญจรผ่านบริเวณนี้';
+    $photo_path = !empty($report['photo_path']) ? $base_url . ltrim($report['photo_path'], '/') : '';
+
+    // 🗺️ 3. ค้นหา LINE User ID ของผู้ใช้ในตาราง tbl_users ที่อยู่ในรัศมี $radius_km
+    // ใช้สูตร Haversine Formula คำนวณระยะทางทางภูมิศาสตร์ (หน่วยเป็นกิโลเมตร: 6371 * acos(...))
+    // รองรับทั้งระบบที่ติดตั้ง Extension PostGIS หรือ PostgreSQL มาตรฐาน
+    $geo_sql = "
+        SELECT line_user_id,
+               (6371 * acos(
+                    cos(radians($1)) * cos(radians(last_latitude)) *
+                    cos(radians(last_longitude) - radians($2)) +
+                    sin(radians($1)) * sin(radians(last_latitude))
+               )) AS distance_km
+        FROM tbl_users
+        WHERE line_user_id IS NOT NULL 
+          AND line_user_id != ''
+          AND last_latitude IS NOT NULL 
+          AND last_longitude IS NOT NULL
+          AND (6371 * acos(
+                    cos(radians($1)) * cos(radians(last_latitude)) *
+                    cos(radians(last_longitude) - radians($2)) +
+                    sin(radians($1)) * sin(radians(last_latitude))
+               )) <= $3
+    ";
+
+    $geo_res = pg_query_params($db, $geo_sql, array($rep_lat, $rep_lng, $radius_km));
+
+    if (!$geo_res || pg_num_rows($geo_res) === 0) {
+        return 0; // ไม่มีผู้ใช้อยู่ในรัศมีเตือนภัย
     }
 
-    // 3. สร้างข้อความ Flex Message เตือนภัย
-    $message = [
-        'type' => 'flex',
-        'altText' => '⚠️ แจ้งเตือนภัย! พบช้างป่าในรัศมี 5 กิโลเมตรจากจุดของคุณ',
-        'contents' => [
-            'type' => 'bubble',
-            'header' => [
-                'type' => 'box', 
-                'layout' => 'vertical', 
-                'backgroundColor' => '#DE350B',
-                'contents' => [
-                    ['type' => 'text', 'text' => '⚠️ เตือนภัยช้างป่าใกล้ตัว', 'weight' => 'bold', 'color' => '#FFFFFF', 'size' => 'lg']
-                ]
-            ],
-            'body' => [
-                'type' => 'box', 
-                'layout' => 'vertical',
-                'contents' => [
-                    ['type' => 'text', 'text' => 'พบช้างป่าในรัศมีไม่เกิน 5 กม. จากพื้นที่ของคุณ โปรดระมัดระวัง!', 'wrap' => true, 'color' => '#333333', 'size' => 'sm'],
-                    ['type' => 'separator', 'margin' => 'md'],
+    $users_to_alert = pg_fetch_all($geo_res) ?: [];
+    $success_count = 0;
+
+    // 🎨 4. สร้างโครงสร้าง LINE Flex Message การเตือนภัย
+    $flex_message_data = [
+        "type" => "flex",
+        "altText" => "🚨 แจ้งเตือนภัย! พบช้างป่าในรัศมี " . $radius_km . " กม. จากตำแหน่งของคุณ",
+        "contents" => [
+            "type" => "bubble",
+            "size" => "mega",
+            "header" => [
+                "type" => "box",
+                "layout" => "vertical",
+                "backgroundColor" => "#dc3545",
+                "paddingAll" => "15px",
+                "contents" => [
                     [
-                        'type' => 'box', 'layout' => 'vertical', 'margin' => 'md', 'spacing' => 'sm',
-                        'contents' => [
-                            ['type' => 'text', 'text' => '🐘 จำนวน: ' . ($report['elephant_count'] ?? 1) . ' ตัว', 'size' => 'sm', 'weight' => 'bold'],
-                            ['type' => 'text', 'text' => '📌 พฤติกรรม: ' . ($report['behavior_type'] ?: 'ไม่ระบุ'), 'size' => 'sm'],
-                            ['type' => 'text', 'text' => '📝 รายละเอียด: ' . ($report['details'] ?: '-'), 'size' => 'sm', 'wrap' => true]
-                        ]
+                        "type" => "text",
+                        "text" => "🚨 แจ้งเตือนภัยช้างป่าใกล้ตัว",
+                        "weight" => "bold",
+                        "color" => "#ffffff",
+                        "size" => "lg"
+                    ],
+                    [
+                        "type" => "text",
+                        "text" => "พบช้างป่าในระยะห่างประมาณ " . $radius_km . " กม.",
+                        "color" => "#ffcccc",
+                        "size" => "xs",
+                        "marginTop" => "4px"
                     ]
                 ]
             ],
-            'footer' => [
-                'type' => 'box', 
-                'layout' => 'vertical',
-                'contents' => [
+            "body" => [
+                "type" => "box",
+                "layout" => "vertical",
+                "spacing" => "md",
+                "contents" => array_merge(
+                    $photo_path ? [[
+                        "type" => "image",
+                        "url" => $photo_path,
+                        "size" => "full",
+                        "aspectRatio" => "20:13",
+                        "aspectMode" => "cover",
+                        "cornerRadius" => "8px"
+                    ]] : [],
                     [
-                        'type' => 'button',
-                        'action' => [
-                            'type' => 'uri',
-                            'label' => '🗺️ ดูตำแหน่งบนแผนที่',
-                            'uri' => 'https://' . ($_SERVER['HTTP_HOST'] ?? 'localhost') . '/public_map.php?highlight_id=' . $report_id
+                        [
+                            "type" => "box",
+                            "layout" => "vertical",
+                            "spacing" => "xs",
+                            "contents" => [
+                                [
+                                    "type" => "text",
+                                    "text" => "🐘 จำนวนที่พบ: " . $elephant_count . " ตัว",
+                                    "weight" => "bold",
+                                    "size" => "md",
+                                    "color" => "#222222"
+                                ],
+                                [
+                                    "type" => "text",
+                                    "text" => "⚠️ พฤติกรรม: " . $behavior,
+                                    "size" => "sm",
+                                    "color" => "#d9534f",
+                                    "weight" => "bold"
+                                ],
+                                [
+                                    "type" => "text",
+                                    "text" => "📝 รายละเอียด: " . $details,
+                                    "size" => "xs",
+                                    "color" => "#666666",
+                                    "wrap" => true
+                                ],
+                                [
+                                    "type" => "text",
+                                    "text" => "⏰ เวลาแจ้งเหตุ: " . date('d/m/Y H:i น.', strtotime($report['reported_at'])),
+                                    "size" => "xs",
+                                    "color" => "#888888",
+                                    "marginTop" => "6px"
+                                ]
+                            ]
+                        ]
+                    ]
+                )
+            ],
+            "footer" => [
+                "type" => "box",
+                "layout" => "vertical",
+                "spacing" => "sm",
+                "contents" => [
+                    [
+                        "type" => "button",
+                        "action" => [
+                            "type" => "uri",
+                            "label" => "🗺️ ดูพิกัดบนแผนที่สาธารณะ",
+                            "uri" => $base_url . "public_map.php?highlight_id=" . $report_id
                         ],
-                        'style' => 'primary', 
-                        'color' => '#DE350B'
+                        "style" => "primary",
+                        "color" => "#198754",
+                        "height" => "sm"
                     ]
                 ]
             ]
         ]
     ];
 
-    // 4. ส่งข้อความผ่าน LINE Multicast API (แบ่งกลุ่มส่งกลุ่มละ 500 คน)
-    $chunks = array_chunk($target_users, 500);
-    $total_sent = 0;
-
-    foreach ($chunks as $chunk) {
-        $chunk_line_ids = array_column($chunk, 'line_user_id');
-
-        $data = [
-            'to' => $chunk_line_ids,
-            'messages' => [$message]
+    // 📤 5. วนลูปส่ง Push Message ไปยังผู้ใช้แต่ละคนผ่าน LINE API
+    foreach ($users_to_alert as $user) {
+        $to_line_id = $user['line_user_id'];
+        
+        $payload = [
+            "to" => $to_line_id,
+            "messages" => [$flex_message_data]
         ];
 
-        $ch = curl_init('https://api.line.me/v2/bot/message/multicast');
+        $ch = curl_init('https://api.line.me/v2/bot/message/push');
         curl_setopt($ch, CURLOPT_POST, true);
         curl_setopt($ch, CURLOPT_CUSTOMREQUEST, 'POST');
         curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-        curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($data));
+        curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($payload));
         curl_setopt($ch, CURLOPT_HTTPHEADER, [
             'Content-Type: application/json',
-            'Authorization: Bearer ' . LINE_CHANNEL_ACCESS_TOKEN
+            'Authorization: Bearer ' . $channel_access_token
         ]);
 
-        $result = curl_exec($ch);
+        $response = curl_exec($ch);
         $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
         curl_close($ch);
 
-        // 5. บันทึกลง tbl_alert เพื่อเก็บประวัติและป้องกันการส่งซ้ำ
-        if ($http_code == 200) {
-            foreach ($chunk as $u) {
-                $q_log = "INSERT INTO tbl_alert (report_id, user_id, distance_km, sent_status) 
-                          VALUES ($1, $2, $3, 'SENT')";
-                pg_query_params($db, $q_log, array($report_id, $u['user_id'], $u['distance_km']));
-            }
-            $total_sent += count($chunk);
-        } else {
-            foreach ($chunk as $u) {
-                $q_log = "INSERT INTO tbl_alert (report_id, user_id, distance_km, sent_status) 
-                          VALUES ($1, $2, $3, 'FAILED')";
-                pg_query_params($db, $q_log, array($report_id, $u['user_id'], $u['distance_km']));
-            }
+        if ($http_code === 200) {
+            $success_count++;
         }
     }
 
-    return $total_sent;
+    return $success_count;
 }
 ?>
