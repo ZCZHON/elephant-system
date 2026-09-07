@@ -11,9 +11,9 @@ date_default_timezone_set('Asia/Bangkok');
  * @return int จำนวนผู้ใช้ที่ส่งแจ้งเตือนสำเร็จ
  */
 function sendElephantAlert($report_id, $db, $radius_km = 5.0) {
-    // 🔑 1. กำหนด LINE Channel Access Token ของคุณ
+    // 🔑 1. กำหนด LINE Channel Access Token และ Domain ของคุณ
     $channel_access_token = 'YOUR_LINE_CHANNEL_ACCESS_TOKEN'; 
-    $base_url = 'https://yourdomain.com/'; // URL หลักของเว็บไซต์สำหรับดูรูปและเปิดแผนที่
+    $base_url = 'https://yourdomain.com/'; // เปลี่ยนเป็น Domain จริงของคุณ
 
     if ($report_id <= 0 || !$db) {
         return 0;
@@ -37,11 +37,14 @@ function sendElephantAlert($report_id, $db, $radius_km = 5.0) {
     $elephant_count = intval($report['elephant_count'] ?? 1);
     $behavior = !empty($report['behavior_type']) ? $report['behavior_type'] : ($report['behavior'] ?? 'ไม่ระบุ');
     $details = !empty($report['details']) ? $report['details'] : 'โปรดระมัดระวังเมื่อสัญจรผ่านบริเวณนี้';
-    $photo_path = !empty($report['photo_path']) ? $base_url . ltrim($report['photo_path'], '/') : '';
+    
+    // จัดการ URL รูปภาพ
+    $photo_path = '';
+    if (!empty($report['photo_path'])) {
+        $photo_path = $base_url . ltrim($report['photo_path'], '/');
+    }
 
-    // 🗺️ 3. ค้นหา LINE User ID ของผู้ใช้ในตาราง tbl_users ที่อยู่ในรัศมี $radius_km
-    // ใช้สูตร Haversine Formula คำนวณระยะทางทางภูมิศาสตร์ (หน่วยเป็นกิโลเมตร: 6371 * acos(...))
-    // รองรับทั้งระบบที่ติดตั้ง Extension PostGIS หรือ PostgreSQL มาตรฐาน
+    // 🗺️ 3. ค้นหาผู้ใช้ในตาราง tbl_users ที่อยู่ในรัศมี $radius_km (Haversine Formula)
     $geo_sql = "
         SELECT line_user_id,
                (6371 * acos(
@@ -70,7 +73,59 @@ function sendElephantAlert($report_id, $db, $radius_km = 5.0) {
     $users_to_alert = pg_fetch_all($geo_res) ?: [];
     $success_count = 0;
 
-    // 🎨 4. สร้างโครงสร้าง LINE Flex Message การเตือนภัย
+    // 🎨 4. สร้างโครงสร้าง Body Contents ของ Flex Message ให้ถูกต้อง
+    $body_contents = [];
+    
+    // เพิ่มรูปภาพเข้า Body (ถ้ามี)
+    if (!empty($photo_path)) {
+        $body_contents[] = [
+            "type" => "image",
+            "url" => $photo_path,
+            "size" => "full",
+            "aspectRatio" => "20:13",
+            "aspectMode" => "cover",
+            "cornerRadius" => "8px"
+        ];
+    }
+
+    // เพิ่มรายละเอียดข้อความเข้า Body
+    $body_contents[] = [
+        "type" => "box",
+        "layout" => "vertical",
+        "spacing" => "xs",
+        "contents" => [
+            [
+                "type" => "text",
+                "text" => "🐘 จำนวนที่พบ: " . $elephant_count . " ตัว",
+                "weight" => "bold",
+                "size" => "md",
+                "color" => "#222222"
+            ],
+            [
+                "type" => "text",
+                "text" => "⚠️ พฤติกรรม: " . $behavior,
+                "size" => "sm",
+                "color" => "#d9534f",
+                "weight" => "bold"
+            ],
+            [
+                "type" => "text",
+                "text" => "📝 รายละเอียด: " . $details,
+                "size" => "xs",
+                "color" => "#666666",
+                "wrap" => true
+            ],
+            [
+                "type" => "text",
+                "text" => "⏰ เวลาแจ้งเหตุ: " . date('d/m/Y H:i น.', strtotime($report['reported_at'] ?? 'now')),
+                "size" => "xs",
+                "color" => "#888888",
+                "marginTop" => "6px"
+            ]
+        ]
+    ];
+
+    // โครงสร้างหลัก Flex Message
     $flex_message_data = [
         "type" => "flex",
         "altText" => "🚨 แจ้งเตือนภัย! พบช้างป่าในรัศมี " . $radius_km . " กม. จากตำแหน่งของคุณ",
@@ -103,53 +158,7 @@ function sendElephantAlert($report_id, $db, $radius_km = 5.0) {
                 "type" => "box",
                 "layout" => "vertical",
                 "spacing" => "md",
-                "contents" => array_merge(
-                    $photo_path ? [[
-                        "type" => "image",
-                        "url" => $photo_path,
-                        "size" => "full",
-                        "aspectRatio" => "20:13",
-                        "aspectMode" => "cover",
-                        "cornerRadius" => "8px"
-                    ]] : [],
-                    [
-                        [
-                            "type" => "box",
-                            "layout" => "vertical",
-                            "spacing" => "xs",
-                            "contents" => [
-                                [
-                                    "type" => "text",
-                                    "text" => "🐘 จำนวนที่พบ: " . $elephant_count . " ตัว",
-                                    "weight" => "bold",
-                                    "size" => "md",
-                                    "color" => "#222222"
-                                ],
-                                [
-                                    "type" => "text",
-                                    "text" => "⚠️ พฤติกรรม: " . $behavior,
-                                    "size" => "sm",
-                                    "color" => "#d9534f",
-                                    "weight" => "bold"
-                                ],
-                                [
-                                    "type" => "text",
-                                    "text" => "📝 รายละเอียด: " . $details,
-                                    "size" => "xs",
-                                    "color" => "#666666",
-                                    "wrap" => true
-                                ],
-                                [
-                                    "type" => "text",
-                                    "text" => "⏰ เวลาแจ้งเหตุ: " . date('d/m/Y H:i น.', strtotime($report['reported_at'])),
-                                    "size" => "xs",
-                                    "color" => "#888888",
-                                    "marginTop" => "6px"
-                                ]
-                            ]
-                        ]
-                    ]
-                )
+                "contents" => $body_contents
             ],
             "footer" => [
                 "type" => "box",
@@ -185,7 +194,14 @@ function sendElephantAlert($report_id, $db, $radius_km = 5.0) {
         curl_setopt($ch, CURLOPT_POST, true);
         curl_setopt($ch, CURLOPT_CUSTOMREQUEST, 'POST');
         curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-        curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($payload));
+        curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($payload, JSON_UNESCAPED_UNICODE));
+        
+        // 🟢 ป้องกัน cURL ค้าง/พัง จากปัญหา SSL Certificate & Timeout
+        curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+        curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, false);
+        curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 5);
+        curl_setopt($ch, CURLOPT_TIMEOUT, 10);
+
         curl_setopt($ch, CURLOPT_HTTPHEADER, [
             'Content-Type: application/json',
             'Authorization: Bearer ' . $channel_access_token
