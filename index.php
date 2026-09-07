@@ -190,7 +190,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 </a>
 
                 <a href="dashboard.php" class="btn btn-outline-light btn-sm fw-bold">
-                    📊 <span class="d-none d-sm-inline">Dashboard</span><span class="d-inline d-sm-none">สถิติ</span>
+                    📊 <span class="d-none d-sm-inline">สถิติ</span><span class="d-inline d-sm-none">สถิติ</span>
                 </a>
 
                 <?php if ($user_role === 'admin'): ?>
