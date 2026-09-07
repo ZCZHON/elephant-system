@@ -1,26 +1,35 @@
 <?php
-// 1. กำหนด Timezone ให้ตรงกับประเทศไทย
+// 1. กำหนด Timezone
 date_default_timezone_set('Asia/Bangkok');
 
-// 2. ปรับปรุงการตั้งค่า Session Cookie (ป้องกันการทำงานซ้ำซ้อน)
-if (session_status() === PHP_SESSION_ACTIVE) {
-    session_write_close(); // ปิด session ชั่วคราวหากมีการเปิดค้างไว้ก่อนหน้า
+// 2. จัดการ Session ป้องกัน Error
+if (session_status() === PHP_SESSION_NONE) {
+    // ถ้ายังไม่ได้เริ่ม Session ให้ตั้งค่า Cookie Parameters ก่อน
+    session_set_cookie_params([
+        'lifetime' => 86400,
+        'path'     => '/',
+        'domain'   => '',
+        'secure'   => true,
+        'httponly' => true,
+        'samesite' => 'None'
+    ]);
+    session_start();
+} else {
+    // ถ้า Session เริ่มไปแล้ว ให้ส่ง Cookie ทับอีกครั้งเพื่อบังคับใช้ SameSite=None
+    $session_id = session_id();
+    if ($session_id) {
+        setcookie(session_name(), $session_id, [
+            'expires'  => time() + 86400,
+            'path'     => '/',
+            'domain'   => '',
+            'secure'   => true,
+            'httponly' => true,
+            'samesite' => 'None'
+        ]);
+    }
 }
 
-// ตั้งค่า Cookie Session ให้รองรับ HTTPS, Cloudflare Tunnel และ LIFF
-session_set_cookie_params([
-    'lifetime' => 86400,   // อายุ Session 1 วัน
-    'path'     => '/',
-    'domain'   => '',
-    'secure'   => true,    // บังคับใช้ HTTPS
-    'httponly' => true,    // ป้องกัน XSS
-    'samesite' => 'None'   // อนุญาตส่ง Cookie ข้ามโดเมน / Cloudflare / LIFF
-]);
-
-// เปิด Session ใหม่อีกครั้งหลังจากตั้งค่าเรียบร้อย
-session_start();
-
-// 3. การตั้งค่าการเชื่อมต่อฐานข้อมูล PostgreSQL บน Docker
+// 3. เชื่อมต่อฐานข้อมูล PostgreSQL
 $host     = "db";                
 $port     = "5432";              
 $dbname   = "elephant_db";       
