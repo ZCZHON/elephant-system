@@ -24,7 +24,7 @@ if (!isset($_SESSION['user_id']) || ($_SESSION['role'] ?? '') !== 'admin') {
     exit();
 }
 
-// 👤 ดึงข้อมูล Admin ที่กำลังใช้งานอยู่ปัจจุบัน (ใช้ Prepared Statement ป้องกัน SQL Injection)
+// 👤 ดึงข้อมูล Admin ที่กำลังใช้งานอยู่ปัจจุบัน (แก้ไขความปลอดภัย SQL Injection)
 $admin_fullname = $_SESSION['fullname'] ?? '';
 if (empty($admin_fullname) && isset($_SESSION['user_id'])) {
     $admin_q = "SELECT first_name, last_name, username FROM tbl_users WHERE user_id = $1";
@@ -477,7 +477,7 @@ foreach ($reports as $r) {
             rejectedEl.innerText = rejected.toLocaleString();
         }
 
-        // ⚡ อัปเดตสถานะ อนุมัติ / ปฏิเสธ (ใช้ SweetAlert2)
+        // ⚡ อัปเดตสถานะ อนุมัติ / ปปฏิเสธ (ใช้ SweetAlert2)
         function updateStatus(reportId, newStatus) {
             var actionText = newStatus === 'verified' ? 'อนุมัติ' : 'ปฏิเสธ';
             var confirmBtnColor = newStatus === 'verified' ? '#198754' : '#dc3545';
