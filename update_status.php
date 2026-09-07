@@ -3,6 +3,7 @@
 date_default_timezone_set('Asia/Bangkok');
 
 include('db.php');
+include('send_geo_alert.php'); // 1. ดึงไฟล์ส่งแจ้งเตือนเข้ามาร่วมใช้งาน
 
 // 🟢 ตั้งค่า Cookie ให้ตรงกับระบบ (รองรับ HTTPS และข้าม Frame/Domain)
 session_set_cookie_params([
@@ -44,19 +45,26 @@ if ($result) {
     // กำหนดข้อความและลิงก์ที่จะไปต่อ
     $message = 'อัปเดตสถานะเรียบร้อยแล้ว';
     $redirect_url = null;
+    $alert_sent_count = 0;
 
     if ($status === 'verified') {
-        $message = 'ยืนยันข้อมูลเรียบร้อย! กำลังนำคุณไปยังหน้าแผนที่สาธารณะ...';
+        // 🚨 2. ส่งแจ้งเตือนภัย LINE ให้คนที่อยู่ในรัศมี 5 กิโลเมตร
+        if (function_exists('sendElephantAlert')) {
+            $alert_sent_count = sendElephantAlert($report_id, $db);
+        }
+
+        $message = 'ยืนยันข้อมูลเรียบร้อย! ส่งแจ้งเตือนภัยให้ผู้ใช้ในรัศมี 5 กม. แล้ว';
         $redirect_url = 'public_map.php?highlight_id=' . $report_id; 
     } elseif ($status === 'rejected') {
         $message = 'ปฏิเสธรายงานเรียบร้อยแล้ว';
     }
 
     echo json_encode([
-        'success' => true, 
-        'message' => $message,
-        'status'  => $status,
-        'redirect_url' => $redirect_url
+        'success'      => true, 
+        'message'      => $message,
+        'status'       => $status,
+        'redirect_url' => $redirect_url,
+        'alert_sent'   => $alert_sent_count // ส่งจำนวนคนที่ได้รับแจ้งเตือนกลับไป
     ]);
 } else {
     echo json_encode(['success' => false, 'message' => 'เกิดข้อผิดพลาดในการบันทึกข้อมูล']);
