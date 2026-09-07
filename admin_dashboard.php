@@ -14,7 +14,9 @@ session_set_cookie_params([
     'samesite' => 'None'   // อนุญาตให้ส่ง Cookie ข้าม Domain/LIFF ได้
 ]);
 
-session_start();
+if (session_status() === PHP_SESSION_NONE) {
+    session_start();
+}
 
 // 🔒 ล็อกความปลอดภัย: ถ้าไม่ได้ล็อกอิน หรือไม่ได้เป็น admin ให้เด้งไปหน้า login.php
 if (!isset($_SESSION['user_id']) || ($_SESSION['role'] ?? '') !== 'admin') {
@@ -22,7 +24,7 @@ if (!isset($_SESSION['user_id']) || ($_SESSION['role'] ?? '') !== 'admin') {
     exit();
 }
 
-// 👤 ดึงข้อมูล Admin ที่กำลังใช้งานอยู่ปัจจุบัน
+// 👤 ดึงข้อมูล Admin ที่กำลังใช้งานอยู่ปัจจุบัน (ใช้ Prepared Statement ป้องกัน SQL Injection)
 $admin_fullname = $_SESSION['fullname'] ?? '';
 if (empty($admin_fullname) && isset($_SESSION['user_id'])) {
     $admin_q = "SELECT first_name, last_name, username FROM tbl_users WHERE user_id = $1";
@@ -81,10 +83,10 @@ $query = "SELECT r.*,
                  u.phone_number 
           FROM tbl_reports r 
           LEFT JOIN tbl_users u ON r.user_id = u.user_id 
-          ORDER BY r.reported_at DESC";
+          ORDER BY COALESCE(r.reported_at, r.created_at) DESC";
 
 $result = pg_query($db, $query);
-$reports = ($result) ? pg_fetch_all($result) ?: [] : [];
+$reports = ($result) ? (pg_fetch_all($result) ?: []) : [];
 
 // คำนวณสถิติ
 $total_reports = count($reports);
@@ -170,23 +172,20 @@ foreach ($reports as $r) {
 </head>
 <body>
 
-    <!-- 🟢 ADMIN NAVBAR (สอดคล้องกับหน้าอื่น + Badge แสดงสิทธิ์ Admin) -->
+    <!-- 🟢 ADMIN NAVBAR -->
     <nav class="navbar navbar-expand-lg navbar-dark nav-custom mb-3 shadow-sm border-bottom border-danger">
         <div class="container-fluid container-md">
-            <!-- โลโก้/ชื่อระบบสำหรับ Admin -->
             <a class="navbar-brand fw-bold text-warning fs-6" href="admin_dashboard.php">
                 🐘 <span class="d-none d-sm-inline">ระบบติดตามการกระจายตัวของช้างป่า</span>
                 <span class="d-inline d-sm-none">จัดการระบบช้างป่า</span>
             </a>
             
             <div class="d-flex align-items-center gap-1 gap-sm-2">
-                <!-- แสดงชื่อผู้ใช้งาน + สถานะ Admin -->
                 <span class="text-white small me-1 d-none d-lg-inline">
-                    👤 <?= htmlspecialchars($admin_fullname) ?>
+                    👤 <?= htmlspecialchars($admin_fullname, ENT_QUOTES, 'UTF-8') ?>
                     <span class="badge bg-danger ms-1">ADMIN</span>
                 </span>
 
-                <!-- เมนูนำทาง -->
                 <a href="index.php" class="btn btn-outline-light btn-sm fw-bold">
                     ➕ <span class="d-none d-sm-inline">ส่งรายงาน</span><span class="d-inline d-sm-none">รายงาน</span>
                 </a>
@@ -203,7 +202,6 @@ foreach ($reports as $r) {
                     🗺️ <span class="d-none d-sm-inline">แผนที่สาธารณะ</span><span class="d-inline d-sm-none">แผนที่</span>
                 </a>
                 
-                <!-- ปุ่มออกจากระบบ -->
                 <a href="logout.php" class="btn btn-outline-danger btn-sm ms-1" title="ออกจากระบบ">
                     🔴 <span class="d-none d-md-inline">ออกจากระบบ</span><span class="d-inline d-md-none">ออก</span>
                 </a>
@@ -212,8 +210,6 @@ foreach ($reports as $r) {
     </nav>
 
     <div class="container-fluid container-md my-4">
-        
-        <!-- Header + ปุ่มเพิ่ม Admin -->
         <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
             <div>
                 <h4 class="fw-bold text-dark mb-0">
@@ -222,7 +218,6 @@ foreach ($reports as $r) {
                 <p class="text-muted small mb-0 d-none d-sm-block">ตรวจสอบและยืนยันข้อมูลจากอาสาสมัครก่อนแสดงบนแผนที่สาธารณะ</p>
             </div>
             
-            <!-- ปุ่มเปิด Modal เพิ่ม Admin -->
             <button type="button" class="btn btn-success btn-sm fw-bold shadow-sm" data-bs-toggle="modal" data-bs-target="#addAdminModal">
                 <i class="fa-solid fa-user-plus me-1"></i> เพิ่ม Admin ใหม่
             </button>
@@ -233,25 +228,25 @@ foreach ($reports as $r) {
             <div class="col-6 col-md-3">
                 <div class="card card-stat p-3 border-start border-primary border-4">
                     <div class="text-muted small fw-bold">รายงานทั้งหมด</div>
-                    <h3 class="fw-bold text-primary mb-0 mt-1"><?php echo number_format($total_reports); ?></h3>
+                    <h3 class="fw-bold text-primary mb-0 mt-1" id="stat-total"><?php echo number_format($total_reports); ?></h3>
                 </div>
             </div>
             <div class="col-6 col-md-3">
                 <div class="card card-stat p-3 border-start border-warning border-4">
                     <div class="text-muted small fw-bold">รอตรวจสอบ (Pending)</div>
-                    <h3 class="fw-bold text-warning mb-0 mt-1"><?php echo number_format($pending_count); ?></h3>
+                    <h3 class="fw-bold text-warning mb-0 mt-1" id="stat-pending"><?php echo number_format($pending_count); ?></h3>
                 </div>
             </div>
             <div class="col-6 col-md-3">
                 <div class="card card-stat p-3 border-start border-success border-4">
                     <div class="text-muted small fw-bold">อนุมัติแล้ว (Verified)</div>
-                    <h3 class="fw-bold text-success mb-0 mt-1"><?php echo number_format($verified_count); ?></h3>
+                    <h3 class="fw-bold text-success mb-0 mt-1" id="stat-verified"><?php echo number_format($verified_count); ?></h3>
                 </div>
             </div>
             <div class="col-6 col-md-3">
                 <div class="card card-stat p-3 border-start border-danger border-4">
                     <div class="text-muted small fw-bold">ปฏิเสธ (Rejected)</div>
-                    <h3 class="fw-bold text-danger mb-0 mt-1"><?php echo number_format($rejected_count); ?></h3>
+                    <h3 class="fw-bold text-danger mb-0 mt-1" id="stat-rejected"><?php echo number_format($rejected_count); ?></h3>
                 </div>
             </div>
         </div>
@@ -274,16 +269,20 @@ foreach ($reports as $r) {
                     </thead>
                     <tbody>
                         <?php if (!empty($reports)): ?>
-                            <?php foreach ($reports as $row): ?>
-                                <tr id="row-<?php echo $row['report_id']; ?>">
-                                    <!-- รูปภาพเปิดดูด้วย Modal -->
+                            <?php foreach ($reports as $row): 
+                                $report_id = htmlspecialchars($row['report_id'], ENT_QUOTES, 'UTF-8');
+                                $report_time = $row['reported_at'] ?? $row['created_at'] ?? 'now';
+                                $behavior = $row['behavior_type'] ?? $row['behavior'] ?? 'ไม่ระบุ';
+                                $current_status = $row['status'] ?? 'pending';
+                            ?>
+                                <tr id="row-<?php echo $report_id; ?>" data-status="<?php echo htmlspecialchars($current_status, ENT_QUOTES, 'UTF-8'); ?>">
                                     <td>
                                         <?php if (!empty($row['photo_path'])): ?>
-                                            <img src="<?php echo htmlspecialchars($row['photo_path']); ?>" 
+                                            <img src="<?php echo htmlspecialchars($row['photo_path'], ENT_QUOTES, 'UTF-8'); ?>" 
                                                  class="img-report" 
                                                  alt="รูปช้าง"
                                                  title="กดเพื่อขยายรูปภาพ"
-                                                 onclick="openImageModal('<?php echo htmlspecialchars($row['photo_path']); ?>')">
+                                                 onclick="openImageModal('<?php echo htmlspecialchars($row['photo_path'], ENT_QUOTES, 'UTF-8'); ?>')">
                                         <?php else: ?>
                                             <div class="bg-light text-muted text-center rounded py-2 small" style="width:55px; height:55px; line-height:38px;">
                                                 <i class="fa-regular fa-image"></i>
@@ -291,48 +290,47 @@ foreach ($reports as $r) {
                                         <?php endif; ?>
                                     </td>
 
-                                    <!-- เวลาที่รายงาน -->
                                     <td class="small">
                                         <div class="fw-bold text-dark">
-                                            <?php echo date('d/m/Y', strtotime($row['reported_at'] ?? $row['created_at'])); ?>
+                                            <?php echo date('d/m/Y', strtotime($report_time)); ?>
                                         </div>
                                         <div class="text-muted">
-                                            <?php echo date('H:i น.', strtotime($row['reported_at'] ?? $row['created_at'])); ?>
+                                            <?php echo date('H:i น.', strtotime($report_time)); ?>
                                         </div>
                                     </td>
 
                                     <td>
-                                        <div class="fw-bold text-dark small"><?php echo htmlspecialchars($row['fullname'] ?: 'ผู้ใช้งาน LINE'); ?></div>
-                                        <a href="tel:<?php echo htmlspecialchars($row['phone_number'] ?? ''); ?>" class="text-decoration-none text-muted small">
-                                            <i class="fa-solid fa-phone fa-xs me-1"></i><?php echo htmlspecialchars(($row['phone_number'] ?? '') ?: '-'); ?>
+                                        <div class="fw-bold text-dark small"><?php echo htmlspecialchars($row['fullname'] ?: 'ผู้ใช้งาน LINE', ENT_QUOTES, 'UTF-8'); ?></div>
+                                        <a href="tel:<?php echo htmlspecialchars($row['phone_number'] ?? '', ENT_QUOTES, 'UTF-8'); ?>" class="text-decoration-none text-muted small">
+                                            <i class="fa-solid fa-phone fa-xs me-1"></i><?php echo htmlspecialchars(($row['phone_number'] ?? '') ?: '-', ENT_QUOTES, 'UTF-8'); ?>
                                         </a>
                                     </td>
 
                                     <td>
                                         <span class="badge bg-danger rounded-pill px-2 fs-6">
-                                             <?php echo $row['elephant_count']; ?>
+                                             <?php echo htmlspecialchars($row['elephant_count'] ?? '1', ENT_QUOTES, 'UTF-8'); ?>
                                         </span>
                                     </td>
 
                                     <td>
                                         <span class="badge bg-light text-dark border">
-                                            <?php echo htmlspecialchars(($row['behavior_type'] ?? $row['behavior'] ?? '') ?: 'ไม่ระบุ'); ?>
+                                            <?php echo htmlspecialchars($behavior, ENT_QUOTES, 'UTF-8'); ?>
                                         </span>
                                     </td>
 
                                     <td class="small" style="max-width: 220px;">
-                                        <div class="text-truncate" title="<?php echo htmlspecialchars($row['details']); ?>">
-                                            <?php echo htmlspecialchars($row['details'] ?: '-'); ?>
+                                        <div class="text-truncate" title="<?php echo htmlspecialchars($row['details'] ?? '', ENT_QUOTES, 'UTF-8'); ?>">
+                                            <?php echo htmlspecialchars($row['details'] ?? '-', ENT_QUOTES, 'UTF-8'); ?>
                                         </div>
                                         <small class="text-primary d-block">
-                                            <i class="fa-solid fa-location-dot me-1"></i><?php echo $row['latitude']; ?>, <?php echo $row['longitude']; ?>
+                                            <i class="fa-solid fa-location-dot me-1"></i><?php echo htmlspecialchars($row['latitude'] ?? '0', ENT_QUOTES, 'UTF-8'); ?>, <?php echo htmlspecialchars($row['longitude'] ?? '0', ENT_QUOTES, 'UTF-8'); ?>
                                         </small>
                                     </td>
 
-                                    <td id="status-badge-<?php echo $row['report_id']; ?>">
-                                        <?php if ($row['status'] === 'verified'): ?>
+                                    <td id="status-badge-<?php echo $report_id; ?>">
+                                        <?php if ($current_status === 'verified'): ?>
                                             <span class="badge bg-success"><i class="fa-solid fa-check me-1"></i>Verified</span>
-                                        <?php elseif ($row['status'] === 'rejected'): ?>
+                                        <?php elseif ($current_status === 'rejected'): ?>
                                             <span class="badge bg-danger"><i class="fa-solid fa-xmark me-1"></i>Rejected</span>
                                         <?php else: ?>
                                             <span class="badge bg-warning text-dark"><i class="fa-solid fa-clock me-1"></i>Pending</span>
@@ -341,12 +339,12 @@ foreach ($reports as $r) {
 
                                     <td class="text-center">
                                         <div class="btn-group btn-group-sm" role="group">
-                                            <button onclick="updateStatus(<?php echo $row['report_id']; ?>, 'verified')" 
+                                            <button onclick="updateStatus(<?php echo $report_id; ?>, 'verified')" 
                                                     class="btn btn-success btn-action" 
                                                     title="อนุมัติและแสดงบนแผนที่">
                                                 <i class="fa-solid fa-check"></i> <span class="d-none d-md-inline">อนุมัติ</span>
                                             </button>
-                                            <button onclick="updateStatus(<?php echo $row['report_id']; ?>, 'rejected')" 
+                                            <button onclick="updateStatus(<?php echo $report_id; ?>, 'rejected')" 
                                                     class="btn btn-outline-danger btn-action" 
                                                     title="ปฏิเสธรายงานนี้">
                                                 <i class="fa-solid fa-xmark"></i>
@@ -451,7 +449,35 @@ foreach ($reports as $r) {
             imageModal.show();
         }
 
-        // ⚡ อัปเดตสถานะ อนุมัติ / ปปฏิเสธ (ใช้ SweetAlert2)
+        // 📊 ฟังก์ชันคำนวณและอัปเดตสถิติตัวเลขบน Card ด้านบน
+        function recalculateStats(oldStatus, newStatus) {
+            if (oldStatus === newStatus) return;
+
+            const pendingEl = document.getElementById('stat-pending');
+            const verifiedEl = document.getElementById('stat-verified');
+            const rejectedEl = document.getElementById('stat-rejected');
+
+            let pending = parseInt(pendingEl.innerText.replace(/,/g, '')) || 0;
+            let verified = parseInt(verifiedEl.innerText.replace(/,/g, '')) || 0;
+            let rejected = parseInt(rejectedEl.innerText.replace(/,/g, '')) || 0;
+
+            // ลบจากสถานะเดิม
+            if (oldStatus === 'pending') pending = Math.max(0, pending - 1);
+            else if (oldStatus === 'verified') verified = Math.max(0, verified - 1);
+            else if (oldStatus === 'rejected') rejected = Math.max(0, rejected - 1);
+
+            // เพิ่มเข้าสถานะใหม่
+            if (newStatus === 'pending') pending++;
+            else if (newStatus === 'verified') verified++;
+            else if (newStatus === 'rejected') rejected++;
+
+            // แสดงผลใหม่
+            pendingEl.innerText = pending.toLocaleString();
+            verifiedEl.innerText = verified.toLocaleString();
+            rejectedEl.innerText = rejected.toLocaleString();
+        }
+
+        // ⚡ อัปเดตสถานะ อนุมัติ / ปฏิเสธ (ใช้ SweetAlert2)
         function updateStatus(reportId, newStatus) {
             var actionText = newStatus === 'verified' ? 'อนุมัติ' : 'ปฏิเสธ';
             var confirmBtnColor = newStatus === 'verified' ? '#198754' : '#dc3545';
@@ -478,7 +504,12 @@ foreach ($reports as $r) {
                     .then(data => {
                         Swal.close();
                         if (data.success) {
+                            var rowEl = document.getElementById('row-' + reportId);
+                            var oldStatus = rowEl ? rowEl.getAttribute('data-status') : 'pending';
                             var badgeCell = document.getElementById('status-badge-' + reportId);
+
+                            if (rowEl) rowEl.setAttribute('data-status', newStatus);
+                            recalculateStats(oldStatus, newStatus);
                             
                             if (newStatus === 'verified') {
                                 badgeCell.innerHTML = '<span class="badge bg-success"><i class="fa-solid fa-check me-1"></i>Verified</span>';
