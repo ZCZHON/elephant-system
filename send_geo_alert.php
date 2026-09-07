@@ -2,7 +2,8 @@
 // send_geo_alert.php
 include('db.php');
 
-define('LINE_CHANNEL_ACCESS_TOKEN', 'YOUR_LINE_CHANNEL_ACCESS_TOKEN');
+// 🔑 ตั้งค่า LINE Channel Access Token (Long-lived)
+define('LINE_CHANNEL_ACCESS_TOKEN', 'vUaGw1vzFBZMaymolByLH4fdNI1vhfNJcGJhWpOWFTjBEZcF/bXW2iNvC90tMQYcxBCqsQQJFg7sFMreK7DUqMJAgYmKQa4PycjAFJo8LtEE4/ISnLbQP5stkk4iM1laj4YFdUo4xNGfsMHodK0tygdB04t89/1O/w1cDnyilFU=');
 
 function sendElephantAlert($report_id, $db) {
     // 1. ดึงข้อมูลรายงานเหตุการณ์ช้างป่า
@@ -17,7 +18,7 @@ function sendElephantAlert($report_id, $db) {
     $lat = (float)$report['latitude'];
     $lng = (float)$report['longitude'];
 
-    // 2. ค้นหาผู้ใช้ในรัศมี 5 กม. ที่ "ยังไม่เคยได้รับแจ้งเตือนสำหรับ report_id นี้" (ป้องกันการส่งซ้ำ)
+    // 2. ค้นหาผู้ใช้ในรัศมี 5 กม. (5000 เมตร) ที่ยังไม่เคยได้รับแจ้งเตือนสำหรับ report_id นี้ (ป้องกันการส่งซ้ำ)
     $q_users = "SELECT DISTINCT u.user_id, u.line_user_id,
                        ROUND((ST_DistanceSphere(
                            ST_MakePoint(r.longitude, r.latitude),
@@ -32,7 +33,6 @@ function sendElephantAlert($report_id, $db) {
                         ST_MakePoint($1, $2)
                       ) <= 5000
                   AND u.user_id NOT IN (
-                      -- กรองคนเคยได้รับแจ้งเตือนจาก tbl_alert สำหรับรายงานนี้ไปแล้วออก
                       SELECT user_id FROM tbl_alert WHERE report_id = $3
                   )";
 
@@ -43,27 +43,27 @@ function sendElephantAlert($report_id, $db) {
     }
 
     $target_users = [];
-    $target_line_ids = [];
-
     while ($row = pg_fetch_assoc($res_users)) {
         $target_users[] = $row;
-        $target_line_ids[] = $row['line_user_id'];
     }
 
-    // 3. สร้างข้อความ Flex Message
+    // 3. สร้างข้อความ Flex Message เตือนภัย
     $message = [
         'type' => 'flex',
         'altText' => '⚠️ แจ้งเตือนภัย! พบช้างป่าในรัศมี 5 กิโลเมตรจากจุดของคุณ',
         'contents' => [
             'type' => 'bubble',
             'header' => [
-                'type' => 'box', 'layout' => 'vertical', 'backgroundColor' => '#DE350B',
+                'type' => 'box', 
+                'layout' => 'vertical', 
+                'backgroundColor' => '#DE350B',
                 'contents' => [
                     ['type' => 'text', 'text' => '⚠️ เตือนภัยช้างป่าใกล้ตัว', 'weight' => 'bold', 'color' => '#FFFFFF', 'size' => 'lg']
                 ]
             ],
             'body' => [
-                'type' => 'box', 'layout' => 'vertical',
+                'type' => 'box', 
+                'layout' => 'vertical',
                 'contents' => [
                     ['type' => 'text', 'text' => 'พบช้างป่าในรัศมีไม่เกิน 5 กม. จากพื้นที่ของคุณ โปรดระมัดระวัง!', 'wrap' => true, 'color' => '#333333', 'size' => 'sm'],
                     ['type' => 'separator', 'margin' => 'md'],
@@ -78,24 +78,26 @@ function sendElephantAlert($report_id, $db) {
                 ]
             ],
             'footer' => [
-                'type' => 'box', 'layout' => 'vertical',
+                'type' => 'box', 
+                'layout' => 'vertical',
                 'contents' => [
                     [
                         'type' => 'button',
                         'action' => [
                             'type' => 'uri',
                             'label' => '🗺️ ดูตำแหน่งบนแผนที่',
-                            'uri' => 'https://' . $_SERVER['HTTP_HOST'] . '/public_map.php?highlight_id=' . $report_id
+                            'uri' => 'https://' . ($_SERVER['HTTP_HOST'] ?? 'localhost') . '/public_map.php?highlight_id=' . $report_id
                         ],
-                        'style' => 'primary', 'color' => '#DE350B'
+                        'style' => 'primary', 
+                        'color' => '#DE350B'
                     ]
                 ]
             ]
         ]
     ];
 
-    // 4. ส่งข้อความผ่าน LINE Multicast API และ บันทึกลง tbl_alert
-    $chunks = array_chunk($target_users, 500); // LINE รองรับไม่เกิน 500 user/รอบ
+    // 4. ส่งข้อความผ่าน LINE Multicast API (แบ่งกลุ่มส่งกลุ่มละ 500 คน)
+    $chunks = array_chunk($target_users, 500);
     $total_sent = 0;
 
     foreach ($chunks as $chunk) {
@@ -120,7 +122,7 @@ function sendElephantAlert($report_id, $db) {
         $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
         curl_close($ch);
 
-        // 5. บันทึกลง tbl_alert
+        // 5. บันทึกลง tbl_alert เพื่อเก็บประวัติและป้องกันการส่งซ้ำ
         if ($http_code == 200) {
             foreach ($chunk as $u) {
                 $q_log = "INSERT INTO tbl_alert (report_id, user_id, distance_km, sent_status) 
@@ -129,7 +131,6 @@ function sendElephantAlert($report_id, $db) {
             }
             $total_sent += count($chunk);
         } else {
-            // กรณีส่งไม่สำเร็จ
             foreach ($chunk as $u) {
                 $q_log = "INSERT INTO tbl_alert (report_id, user_id, distance_km, sent_status) 
                           VALUES ($1, $2, $3, 'FAILED')";
@@ -140,3 +141,4 @@ function sendElephantAlert($report_id, $db) {
 
     return $total_sent;
 }
+?>
