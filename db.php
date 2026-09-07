@@ -2,9 +2,9 @@
 // 1. กำหนด Timezone
 date_default_timezone_set('Asia/Bangkok');
 
-// 🟢 2. ตรวจสอบการเชื่อมต่อแบบ HTTPS
+// 2. ตรวจสอบการเชื่อมต่อแบบ HTTPS
 $is_https = (isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] === 'on') || 
-             (isset($_SERVER['HTTP_X_FORWARDED_PROTO']) && $_SERVER['HTTP_X_FORWARDED_PROTO'] === 'https');
+            (isset($_SERVER['HTTP_X_FORWARDED_PROTO']) && $_SERVER['HTTP_X_FORWARDED_PROTO'] === 'https');
 
 // 3. จัดการ Session ให้ปลอดภัยและรองรับ LINE LIFF
 if (session_status() === PHP_SESSION_NONE) {
@@ -34,5 +34,4 @@ if (!$db) {
     die("❌ ไม่สามารถเชื่อมต่อฐานข้อมูล PostgreSQL ได้: " . pg_last_error());
 }
 
-pg_set_client_encoding($db, "UNICODE"); 
-?>
+pg_set_client_encoding($db, "UNICODE");
