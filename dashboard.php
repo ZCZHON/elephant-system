@@ -2,28 +2,28 @@
 // กำหนด Timezone ระดับ PHP
 date_default_timezone_set('Asia/Bangkok');
 
-include('db.php');
-
-// 🟢 ตั้งค่า Cookie Session
-session_set_cookie_params([
-    'lifetime' => 86400,
-    'path' => '/',
-    'domain' => '',
-    'secure' => true,
-    'httponly' => true,
-    'samesite' => 'None'
-]);
-
+// 🟢 1. ตั้งค่า Cookie Session ก่อนเริ่ม Session หรือ include ไฟล์อื่น
 if (session_status() === PHP_SESSION_NONE) {
+    session_set_cookie_params([
+        'lifetime' => 86400,
+        'path' => '/',
+        'domain' => '',
+        'secure' => true,
+        'httponly' => true,
+        'samesite' => 'None'
+    ]);
     session_start();
 }
+
+// 🟢 2. เรียกใช้งานไฟล์ เชื่อมต่อฐานข้อมูล
+include('db.php');
 
 // ตัวแปรเช็กสิทธิ์สำหรับแสดง UI
 $is_logged_in = isset($_SESSION['user_id']);
 $user_role    = $_SESSION['role'] ?? 'user';
 $user_name    = $_SESSION['fullname'] ?? $_SESSION['user_name'] ?? 'ผู้ใช้งาน';
 
-// 🟢 1. รับค่าการกรองช่วงเวลา (Days Range: 7, 15, 30 หรือ all)
+// 🟢 3. รับค่าการกรองช่วงเวลา (Days Range: 7, 15, 30 หรือ all)
 $days = $_GET['range'] ?? '7';
 $interval_days = null;
 
@@ -39,8 +39,7 @@ if ($interval_days !== null) {
     $date_where = " AND reported_at >= NOW() - INTERVAL '{$interval_days} days' ";
 }
 
-// 📊 2. ดึงสถิติตัวเลขภาพรวม (Stat Cards)
-// 2.1 สรุปข้อมูลรายงานภาพรวม (รวมคำสั่ง SQL เป็น Query เดียวเพื่อประสิทธิภาพที่ดีขึ้น)
+// 📊 4. ดึงสถิติตัวเลขภาพรวม (Stat Cards)
 $stat_sql = "
     SELECT 
         COALESCE(SUM(CASE WHEN status IN ('verified', 'approved') THEN elephant_count ELSE 0 END), 0) AS total_elephants,
@@ -58,31 +57,31 @@ $r_stat = pg_fetch_assoc($q_stat) ?: [
     'total_all_reports' => 0
 ];
 
-$total_elephants  = (int)$r_stat['total_elephants'];
-$verified_reports = (int)$r_stat['verified_reports'];
-$total_pending    = (int)$r_stat['pending_reports'];
+$total_elephants   = (int)$r_stat['total_elephants'];
+$verified_reports  = (int)$r_stat['verified_reports'];
+$total_pending     = (int)$r_stat['pending_reports'];
 $total_all_reports = (int)$r_stat['total_all_reports'];
 
-// 2.2 จำนวนอาสาสมัคร/ผู้ลงทะเบียนทั้งหมดในระบบ
+// จำนวนอาสาสมัคร/ผู้ลงทะเบียนทั้งหมดในระบบ
 $q_volunteers = pg_query($db, "SELECT COUNT(user_id) AS total_volunteers FROM tbl_users");
 $r_volunteers = pg_fetch_assoc($q_volunteers);
 $total_volunteers = (int)($r_volunteers['total_volunteers'] ?? 0);
 
-// 📜 3. ดึงประวัติรายการรายงานล่าสุด (Latest Reports List - 10 รายการ)
+// 📜 5. ดึงประวัติรายการรายงานล่าสุด (แก้ไขการอ้างอิง created_at แล้ว)
 $history_sql = "
     SELECT r.report_id, 
            r.elephant_count, 
            r.behavior_type, 
            r.details, 
            r.photo_path, 
-           COALESCE(r.reported_at, r.created_at) AS reported_at, 
+           r.reported_at, 
            r.status, 
            u.first_name, 
            u.last_name 
     FROM tbl_reports r 
     LEFT JOIN tbl_users u ON r.user_id = u.user_id 
     WHERE 1=1 {$date_where}
-    ORDER BY COALESCE(r.reported_at, r.created_at) DESC 
+    ORDER BY r.reported_at DESC 
     LIMIT 10
 ";
 $q_history = pg_query($db, $history_sql);
