@@ -195,7 +195,7 @@ foreach ($reports as $r) {
                 </a>
 
                 <a href="dashboard.php" class="btn btn-outline-info btn-sm fw-bold">
-                    📊 <span class="d-none d-sm-inline">Dashboard</span><span class="d-inline d-sm-none">สถิติ</span>
+                    📊 <span class="d-none d-sm-inline">สถิติ</span><span class="d-inline d-sm-none">สถิติ</span>
                 </a>
 
                 <a href="public_map.php" class="btn btn-outline-info btn-sm fw-bold">
