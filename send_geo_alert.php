@@ -11,9 +11,9 @@ date_default_timezone_set('Asia/Bangkok');
  * @return int จำนวนผู้ใช้ที่ส่งแจ้งเตือนสำเร็จ
  */
 function sendElephantAlert($report_id, $db, $radius_km = 5.0) {
-    // 🔑 1. กำหนด LINE Channel Access Token และ Domain ของคุณ
-    $channel_access_token = 'YOUR_LINE_CHANNEL_ACCESS_TOKEN'; 
-    $base_url = 'https://yourdomain.com/'; // เปลี่ยนเป็น Domain จริงของคุณ
+    // 🔑 1. LINE Channel Access Token และ Base URL ของคุณ
+    $channel_access_token = 'vUaGw1vzFBZMaymolByLH4fdNI1vhfNJcGJhWpOWFTjBEZcF/bXW2iNvC90tMQYcxBCqsQQJFg7sFMreK7DUqMJAgYmKQa4PycjAFJo8LtEE4/ISnLbQP5stkk4iM1laj4YFdUo4xNGfsMHodK0tygdB04t89/1O/w1cDnyilFU='; 
+    $base_url = 'https://renaissance-scenario-tuner-rice.trycloudflare.com/';
 
     if ($report_id <= 0 || !$db) {
         return 0;
@@ -73,7 +73,7 @@ function sendElephantAlert($report_id, $db, $radius_km = 5.0) {
     $users_to_alert = pg_fetch_all($geo_res) ?: [];
     $success_count = 0;
 
-    // 🎨 4. สร้างโครงสร้าง Body Contents ของ Flex Message ให้ถูกต้อง
+    // 🎨 4. สร้างโครงสร้าง Body Contents ของ Flex Message
     $body_contents = [];
     
     // เพิ่มรูปภาพเข้า Body (ถ้ามี)
@@ -196,7 +196,7 @@ function sendElephantAlert($report_id, $db, $radius_km = 5.0) {
         curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
         curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($payload, JSON_UNESCAPED_UNICODE));
         
-        // 🟢 ป้องกัน cURL ค้าง/พัง จากปัญหา SSL Certificate & Timeout
+        // ป้องกัน cURL ค้าง/พัง จากปัญหา SSL Certificate & Timeout
         curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
         curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, false);
         curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 5);
