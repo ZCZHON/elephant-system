@@ -2,21 +2,21 @@
 // กำหนด Timezone ระดับ PHP
 date_default_timezone_set('Asia/Bangkok');
 
-include('db.php');
-
-// 🟢 ตั้งค่า Cookie ให้ตรงกับ login.php (รองรับ HTTPS และข้าม Frame/Domain)
-session_set_cookie_params([
-    'lifetime' => 86400,
-    'path' => '/',
-    'domain' => '',
-    'secure' => true,      // บังคับใช้ HTTPS
-    'httponly' => true,    // ป้องกัน JavaScript เข้าถึง Cookie
-    'samesite' => 'None'   // อนุญาตให้ส่ง Cookie ข้าม Domain/LIFF ได้
-]);
-
+// 🟢 1. ตั้งค่า Cookie Session (ต้องทำก่อน session_start และก่อน include db.php)
 if (session_status() === PHP_SESSION_NONE) {
+    session_set_cookie_params([
+        'lifetime' => 86400,
+        'path'     => '/',
+        'domain'   => '',
+        'secure'   => isset($_SERVER['HTTPS']), // เปิดใช้ secure เฉพาะเมื่อเป็น HTTPS
+        'httponly' => true,                    // ป้องกัน JS เข้าถึง Cookie
+        'samesite' => 'Lax'                    // ปรับเป็น Lax เพื่อความปลอดภัยจาก CSRF
+    ]);
     session_start();
 }
+
+// 🟢 2. เรียกใช้ไฟล์ฐานข้อมูลหลังจากตั้งค่า Session แล้ว
+include('db.php');
 
 // 🔒 ล็อกความปลอดภัย: ถ้าไม่ได้ล็อกอิน หรือไม่ได้เป็น admin ให้เด้งไปหน้า login.php
 if (!isset($_SESSION['user_id']) || ($_SESSION['role'] ?? '') !== 'admin') {
@@ -24,7 +24,7 @@ if (!isset($_SESSION['user_id']) || ($_SESSION['role'] ?? '') !== 'admin') {
     exit();
 }
 
-// 👤 ดึงข้อมูล Admin ที่กำลังใช้งานอยู่ปัจจุบัน (แก้ไขความปลอดภัย SQL Injection)
+// 👤 ดึงข้อมูล Admin ที่กำลังใช้งานอยู่ปัจจุบัน
 $admin_fullname = $_SESSION['fullname'] ?? '';
 if (empty($admin_fullname) && isset($_SESSION['user_id'])) {
     $admin_q = "SELECT first_name, last_name, username FROM tbl_users WHERE user_id = $1";
@@ -77,27 +77,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     }
 }
 
-// 1. ดึงข้อมูลรายงานแจ้งเหตุทั้งหมด
+// 📜 1. ดึงข้อมูลรายงานแจ้งเหตุทั้งหมด (แก้ไข SQL Error: ตัด r.created_at ออก)
 $query = "SELECT r.*, 
                  CONCAT(u.first_name, ' ', u.last_name) AS fullname,
                  u.phone_number 
           FROM tbl_reports r 
           LEFT JOIN tbl_users u ON r.user_id = u.user_id 
-          ORDER BY COALESCE(r.reported_at, r.created_at) DESC";
+          ORDER BY r.reported_at DESC";
 
 $result = pg_query($db, $query);
 $reports = ($result) ? (pg_fetch_all($result) ?: []) : [];
 
 // คำนวณสถิติ
-$total_reports = count($reports);
-$pending_count = 0;
+$total_reports  = count($reports);
+$pending_count  = 0;
 $verified_count = 0;
 $rejected_count = 0;
 
 foreach ($reports as $r) {
     $st = $r['status'] ?? 'pending';
     if ($st === 'pending') $pending_count++;
-    elseif ($st === 'verified') $verified_count++;
+    elseif ($st === 'verified' || $st === 'approved') $verified_count++;
     elseif ($st === 'rejected') $rejected_count++;
 }
 ?>
@@ -271,7 +271,7 @@ foreach ($reports as $r) {
                         <?php if (!empty($reports)): ?>
                             <?php foreach ($reports as $row): 
                                 $report_id = htmlspecialchars($row['report_id'], ENT_QUOTES, 'UTF-8');
-                                $report_time = $row['reported_at'] ?? $row['created_at'] ?? 'now';
+                                $report_time = $row['reported_at'] ?? 'now';
                                 $behavior = $row['behavior_type'] ?? $row['behavior'] ?? 'ไม่ระบุ';
                                 $current_status = $row['status'] ?? 'pending';
                             ?>
@@ -328,7 +328,7 @@ foreach ($reports as $r) {
                                     </td>
 
                                     <td id="status-badge-<?php echo $report_id; ?>">
-                                        <?php if ($current_status === 'verified'): ?>
+                                        <?php if ($current_status === 'verified' || $current_status === 'approved'): ?>
                                             <span class="badge bg-success"><i class="fa-solid fa-check me-1"></i>Verified</span>
                                         <?php elseif ($current_status === 'rejected'): ?>
                                             <span class="badge bg-danger"><i class="fa-solid fa-xmark me-1"></i>Rejected</span>
@@ -463,12 +463,12 @@ foreach ($reports as $r) {
 
             // ลบจากสถานะเดิม
             if (oldStatus === 'pending') pending = Math.max(0, pending - 1);
-            else if (oldStatus === 'verified') verified = Math.max(0, verified - 1);
+            else if (oldStatus === 'verified' || oldStatus === 'approved') verified = Math.max(0, verified - 1);
             else if (oldStatus === 'rejected') rejected = Math.max(0, rejected - 1);
 
             // เพิ่มเข้าสถานะใหม่
             if (newStatus === 'pending') pending++;
-            else if (newStatus === 'verified') verified++;
+            else if (newStatus === 'verified' || newStatus === 'approved') verified++;
             else if (newStatus === 'rejected') rejected++;
 
             // แสดงผลใหม่
@@ -477,7 +477,7 @@ foreach ($reports as $r) {
             rejectedEl.innerText = rejected.toLocaleString();
         }
 
-        // ⚡ อัปเดตสถานะ อนุมัติ / ปปฏิเสธ (ใช้ SweetAlert2)
+        // ⚡ อัปเดตสถานะ อนุมัติ / ปฏิเสธ (ใช้ SweetAlert2 + fetch)
         function updateStatus(reportId, newStatus) {
             var actionText = newStatus === 'verified' ? 'อนุมัติ' : 'ปฏิเสธ';
             var confirmBtnColor = newStatus === 'verified' ? '#198754' : '#dc3545';
