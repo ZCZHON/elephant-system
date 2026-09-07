@@ -1,11 +1,24 @@
 <?php
-// 1. ดึงไฟล์เชื่อมต่อฐานข้อมูลและการจัดการ Session หลัก
+// กำหนด Timezone ระดับ PHP
+date_default_timezone_set('Asia/Bangkok');
+
+// 🟢 1. ตั้งค่า Cookie Session ก่อนเริ่ม Session หรือ include ไฟล์อื่น
 if (session_status() === PHP_SESSION_NONE) {
+    session_set_cookie_params([
+        'lifetime' => 86400,
+        'path'     => '/',
+        'domain'   => '',
+        'secure'   => isset($_SERVER['HTTPS']), // เปิดใช้ secure เฉพาะเมื่อเป็น HTTPS
+        'httponly' => true,                    // ป้องกัน JavaScript เข้าถึง Cookie
+        'samesite' => 'Lax'                    // ปรับเป็น Lax เพื่อความปลอดภัย
+    ]);
     session_start();
 }
+
+// 🟢 2. เรียกใช้ไฟล์ฐานข้อมูล
 include('db.php');
 
-// 🔒 2. ตรวจสอบการเข้าสู่ระบบ (หากไม่มี Session และไม่ใช่ POST Request ให้เด้งไป login.php)
+// 🔒 3. ตรวจสอบการเข้าสู่ระบบ (หากไม่มี Session และไม่ใช่ POST Request ให้เด้งไป login.php)
 if (!isset($_SESSION['user_id']) && $_SERVER['REQUEST_METHOD'] !== 'POST') {
     header("Location: login.php");
     exit();
@@ -15,7 +28,7 @@ if (!isset($_SESSION['user_id']) && $_SERVER['REQUEST_METHOD'] !== 'POST') {
 $user_name = $_SESSION['fullname'] ?? $_SESSION['user_name'] ?? 'ผู้ใช้งาน LINE';
 $user_role = $_SESSION['role'] ?? 'user';
 
-// 🐘 3. ประมวลผลเมื่อมีการส่งฟอร์มรายงาน (POST Request)
+// 🐘 4. ประมวลผลเมื่อมีการส่งฟอร์มรายงาน (POST Request)
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     // กำหนดให้ Output คืนค่ากลับเป็น JSON เสมอ
     header('Content-Type: application/json; charset=utf-8');
@@ -51,8 +64,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             } else {
                 // สมาชิกใหม่ -> บันทึกลง tbl_users
                 $insert_user = pg_query_params($db, 
-                    "INSERT INTO tbl_users (line_user_id, first_name, registered_at, role) VALUES ($1, $2, NOW(), 'user') RETURNING user_id", 
-                    array($line_user_id, $user_name_input)
+                    "INSERT INTO tbl_users (line_user_id, first_name, registered_at, role, last_latitude, last_longitude, last_location_updated) 
+                     VALUES ($1, $2, NOW(), 'user', $3::double precision, $4::double precision, NOW()) RETURNING user_id", 
+                    array($line_user_id, $user_name_input, $latitude, $longitude)
                 );
                 
                 if ($insert_user) {
@@ -70,10 +84,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         // หากระบุ user_id ได้สำเร็จ
         if (!empty($user_id) && empty($error_msg)) {
-            // 📸 จัดการอัปโหลดไฟล์รูปภาพอย่างปลอดภัย
+            
+            // 📍 5. อัปเดตพิกัดล่าสุดของผู้ใช้ไว้ส่งแจ้งเตือนภัย LINE Geo-Alert
+            pg_query_params($db, 
+                "UPDATE tbl_users SET last_latitude = $1::double precision, last_longitude = $2::double precision, last_location_updated = NOW() WHERE user_id = $3", 
+                array($latitude, $longitude, $user_id)
+            );
+
+            // 📸 6. จัดการอัปโหลดไฟล์รูปภาพอย่างปลอดภัย
             $allowed_exts = ['jpg', 'jpeg', 'png', 'webp'];
             $ext = strtolower(pathinfo($_FILES['photo']['name'], PATHINFO_EXTENSION));
-            if (empty($ext) || !in_array($ext, $allowed_exts)) { 
+            if (empty($ext) || !in_array($ext, $allowed_exts, true)) { 
                 $ext = 'jpg'; 
             }
             
@@ -120,7 +141,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 <html lang="th">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>ระบบติดตามการกระจายตัวของช้างป่าในประเทศไทย</title>
     <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;600;700&display=swap" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
@@ -156,8 +177,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             
             <div class="d-flex align-items-center gap-1 gap-sm-2">
                 <span class="text-white small d-none d-md-inline me-1" id="line_user_display">
-                    👤 <?= htmlspecialchars($user_name) ?>
-                    <span class="badge bg-<?= $user_role === 'admin' ? 'danger' : 'success' ?> ms-1"><?= strtoupper(htmlspecialchars($user_role)) ?></span>
+                    👤 <?= htmlspecialchars($user_name, ENT_QUOTES, 'UTF-8') ?>
+                    <span class="badge bg-<?= $user_role === 'admin' ? 'danger' : 'success' ?> ms-1"><?= strtoupper(htmlspecialchars($user_role, ENT_QUOTES, 'UTF-8')) ?></span>
                 </span>
 
                 <a href="index.php" class="btn btn-outline-light btn-sm fw-bold">
@@ -257,7 +278,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         document.getElementById('user_name').value = profile.displayName;
                         const displayElement = document.getElementById('line_user_display');
                         if (displayElement) {
-                            displayElement.innerHTML = '👤 ' + profile.displayName + ' <span class="badge bg-<?= $user_role === "admin" ? "danger" : "success" ?> ms-1"><?= strtoupper(htmlspecialchars($user_role)) ?></span>';
+                            displayElement.innerHTML = '👤 ' + profile.displayName + ' <span class="badge bg-<?= $user_role === "admin" ? "danger" : "success" ?> ms-1"><?= strtoupper(htmlspecialchars($user_role, ENT_QUOTES, "UTF-8")) ?></span>';
                         }
                     }
                 }
